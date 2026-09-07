@@ -63,7 +63,7 @@ class AgentMonitor:
                 if identity not in seen_usage:
                     seen_usage.add(identity); unique.append(usage)
             turn.usage[:] = unique
-        combined.turns[:] = [turn for turn in combined.turns if turn.usage or turn.user_preview]
+        combined.turns[:] = [turn for turn in combined.turns if turn.usage or turn.user_preview or turn.agent == 'antigravity']
         by_session = {(session.agent, session.session_id): session for session in combined.sessions}
         for session in combined.sessions:
             session.own_usage = [usage for turn in combined.turns if turn.agent == session.agent and turn.session_id == session.session_id for usage in turn.usage]
@@ -140,7 +140,7 @@ class AgentMonitor:
                 if identity not in seen_usage:
                     seen_usage.add(identity); unique.append(usage)
             turn.usage[:] = unique
-        fresh_sessions = list(sessions.values()); fresh_turns = [turn for turn in turns.values() if turn.usage or turn.user_preview]
+        fresh_sessions = list(sessions.values()); fresh_turns = [turn for turn in turns.values() if turn.usage or turn.user_preview or turn.agent == 'antigravity']
         for session in fresh_sessions:
             session.own_usage = [usage for turn in fresh_turns if turn.agent == session.agent and turn.session_id == session.session_id for usage in turn.usage]
             session.child_usage = []
@@ -155,9 +155,18 @@ class AgentMonitor:
         snapshot = self._snapshot or self.get_snapshot()
         selected_keys = {(session.agent, session.session_id) for session in snapshot['sessions'] if session.session_id == session_id and (agent is None or session.agent == agent)}
         selected = {path for session in snapshot['sessions'] if (session.agent, session.session_id) in selected_keys for path in (session.sources or [session.source_path])}
+        latest_sessions = {(session.agent, session.session_id): session for session in snapshot['sessions'] if (session.agent, session.session_id) in selected_keys}
+        # Live views may have observed completion after the dashboard snapshot.
+        # Include views produced through either the explicit-agent or legacy API.
+        for live in sorted(self._live_snapshots.values(), key=lambda value: value['generation']):
+            latest_sessions.update({(session.agent, session.session_id): session for session in live['sessions'] if (session.agent, session.session_id) in selected_keys})
+        completed_paths = {path for identity, session in latest_sessions.items()
+                           if identity[0] == 'codex' and session.status in ('complete', 'completed')
+                           for path in (session.sources or [session.source_path])}
+        tracked = selected - completed_paths
         refreshed = []; changed = []
         for source in self._sources:
-            if str(source.path) not in selected:
+            if str(source.path) not in tracked:
                 refreshed.append(source); continue
             try:
                 stat = source.path.stat()

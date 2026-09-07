@@ -4,9 +4,10 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from .adapter import append_bounded, clipped_duration_seconds, comparison_summary, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, get, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, prior_period, record, subtree_keys, usage_label, usage_total, weighted_cache_ratio
+from .adapter import append_bounded, clipped_duration_seconds, duration_label, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, get, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, record, request_timeline, subtree_keys, usage_label, usage_total, weighted_cache_ratio
 from .core import CoreContractError, load_snapshot
 from .view_data import build_view_data
+from .help_text import COLUMN_HELP
 
 _NESTED_COLUMNS={"own_usage","child_usage","usage"}
 def _scalar_table(value):
@@ -15,6 +16,58 @@ def _scalar_table(value):
         if name in data:
             data[f"{name}_count"] = data[name].map(lambda rows: len(rows) if isinstance(rows, (list, tuple)) else 0)
     return data.drop(columns=[name for name in _NESTED_COLUMNS if name in data],errors="ignore")
+
+def _table(data, *, column_config=None, **kwargs):
+    config = {name: {"help": COLUMN_HELP[name]} for name in getattr(data, "columns", []) if name in COLUMN_HELP}
+    for name, options in (column_config or {}).items():
+        if isinstance(options, dict):
+            config[name] = {**config.get(name, {}), **options}
+            if not config[name].get("help") and name in COLUMN_HELP:
+                config[name]["help"] = COLUMN_HELP[name]
+        else:
+            config[name] = options
+    return st.dataframe(data, column_config=config, **kwargs)
+
+
+def _duration_table(value):
+    data = _scalar_table(value).copy()
+    for name, label in (("clipped_duration_seconds", "기간 내 작업 시간 (시:분:초)"), ("duration_seconds", "작업 시간 (시:분:초)")):
+        if name in data:
+            data[name] = data[name].map(duration_label)
+            data = data.rename(columns={name: label})
+    return data
+
+
+def _chart(figure, title, description):
+    st.subheader(title)
+    st.caption(description)
+    figure.update_layout(title={"text": ""})
+    st.plotly_chart(figure, use_container_width=True)
+
+
+def _duration_axis(figure, seconds, axis="y"):
+    known = pd.to_numeric(pd.Series(seconds), errors="coerce").dropna()
+    if not known.empty:
+        maximum = max(float(known.max()), 0)
+        ticks = sorted({int(maximum * index / 4 + 0.5) for index in range(5)})
+        figure.update_layout(**{f"{axis}axis": {"title": "작업 시간 (시:분:초)", "tickmode": "array", "tickvals": ticks, "ticktext": [duration_label(value) for value in ticks]}})
+    return figure
+
+
+def _duration_line(data):
+    display = data.assign(작업시간=data.duration_seconds.map(duration_label))
+    figure = px.line(display, x="date", y="duration_seconds", custom_data=["작업시간"], labels={"date": "날짜"})
+    figure.update_traces(hovertemplate="날짜: %{x}<br>작업 시간: %{customdata[0]}<extra></extra>")
+    return _duration_axis(figure, data.duration_seconds)
+
+
+def _event_table(data, timezone_name):
+    _table(data, use_container_width=True, hide_index=True,
+                 column_order=[name for name in ("occurred_at", "role", "message") if name in data],
+                 column_config={"occurred_at": st.column_config.DatetimeColumn("시각", format="MM-DD HH:mm:ss", timezone=timezone_name, width="medium"),
+                                "role": st.column_config.TextColumn("역할", width="small"),
+                                "message": st.column_config.TextColumn("메시지", width="large")})
+
 
 def _view(snapshot, state):
     # Transcript records are fetched only by the selected history log pane.
@@ -84,7 +137,7 @@ def _filters(snapshot):
             st.caption(f"{label}: 구성 루트 {roots} · 읽은 로그 파일 {files} · 세션 {count}")
         diagnostics=list(snapshot.get("diagnostics", []))+list(snapshot.get("config_diagnostics", []))
         if diagnostics:
-            st.warning(f"진단 {len(diagnostics)}건: 일부 로그 경로를 읽지 못했을 수 있습니다.")
+            st.warning(f"진단 {len(diagnostics)}건: 설정에서 수집 상태와 형식 안내를 확인하세요.")
     if refresh: _dashboard_refresh()
     selected=filtered_sessions(sessions,start,end,agents,projects)
     return selected,{"page":page,"start":start,"end":end,"agents":agents,"projects":projects,"models":models}
@@ -101,26 +154,45 @@ def _dashboard_refresh():
 
 def overview(snapshot,sessions,state,view=None):
     zone=snapshot.get("timezone") or snapshot.get("config", {}).get("timezone") or "UTC"
-    view=view or {}; st.header("개요"); usage=view.get("usage_df",pd.DataFrame()); requests=view.get("requests_df",pd.DataFrame())
+    view=view or {}; st.header("개요"); st.caption("선택한 기간과 필터에 해당하는 세션·요청·사용량을 요약합니다. 알 수 없는 값은 —로 표시합니다."); usage=view.get("usage_df",pd.DataFrame()); requests=view.get("requests_df",pd.DataFrame())
     summary=(view or {}).get("summary",{}); total=summary.get("total_tokens",usage.total_tokens.sum(min_count=1) if "total_tokens" in usage else None); input_total=summary.get("input_tokens",usage.input_tokens.sum(min_count=1) if "input_tokens" in usage else None); output_total=summary.get("output_tokens",usage.output_tokens.sum(min_count=1) if "output_tokens" in usage else None); cache=usage.cache_read_tokens.sum(min_count=1) if "cache_read_tokens" in usage else None
     known=requests.get("clipped_duration_seconds",pd.Series(dtype=float)).dropna(); average=(summary.get("request_duration_seconds") / len(known)) if len(known) and summary.get("request_duration_seconds") is not None else None; ratio=summary.get("cache_read_ratio",weighted_cache_ratio(usage)); ratio=(ratio*100) if ratio is not None else None
-    cols=st.columns(6); cols[0].metric("세션",len(sessions)); cols[1].metric("요청",len(requests)); cols[2].metric("전체 토큰",usage_label(total)); cols[3].metric("입력 / 출력",f"{usage_label(input_total)} / {usage_label(output_total)}"); cols[4].metric("평균 작업 시간",f"{average:.0f}초" if average is not None else "—"); cols[5].metric("캐시 읽기 비율",f"{ratio:.1f}%" if ratio is not None else "—")
+    cols=st.columns(5)
+    for column, label, value, description in zip(cols,
+            ("세션", "요청", "전체 토큰", "입력 토큰", "출력 토큰"),
+            (len(sessions), len(requests), usage_label(total), usage_label(input_total), usage_label(output_total)),
+            ("선택 기간에 활동한 대화 수", "선택 세션의 개별 요청 수", "확인된 사용량 이벤트의 토큰 합계", "요청에 사용한 입력 토큰 합계", "응답으로 생성한 출력 토큰 합계")):
+        column.metric(label, value, help=description)
+        column.caption(description)
+    average_input = pd.to_numeric(requests.get("input_tokens", pd.Series(dtype=float)), errors="coerce").mean()
+    average_output = pd.to_numeric(requests.get("output_tokens", pd.Series(dtype=float)), errors="coerce").mean()
+    cols=st.columns(4)
+    for column, label, value, description in zip(cols,
+            ("평균 입력 토큰", "평균 출력 토큰", "평균 작업 시간", "캐시 읽기 비율"),
+            (f"{average_input:,.1f}" if pd.notna(average_input) else "—", f"{average_output:,.1f}" if pd.notna(average_output) else "—", duration_label(average), f"{ratio:.1f}%" if ratio is not None else "—"),
+            ("입력이 확인된 요청당 평균 · 미확인 요청 제외", "출력이 확인된 요청당 평균 · 미확인 요청 제외", "시:분:초 · 기간 내 요청 시간의 평균", "입력·캐시가 함께 확인된 기록 기준")):
+        column.metric(label, value, help=description)
+        column.caption(description)
     if not usage.empty and "occurred_at" in usage and usage.occurred_at.notna().any():
         daily=usage.dropna(subset=["occurred_at"]).assign(날짜=lambda d:d.occurred_at.dt.tz_convert(zone).dt.date)
-        st.plotly_chart(px.line(daily.groupby("날짜").total_tokens.sum(min_count=1).reset_index(),x="날짜",y="total_tokens",title="일별 전체 토큰"),use_container_width=True)
+        _chart(px.line(daily.groupby("날짜").total_tokens.sum(min_count=1).reset_index(),x="날짜",y="total_tokens",labels={"total_tokens":"토큰"}), "일별 전체 토큰", "설정한 시간대의 날짜별 토큰 합계입니다. 사용량이 확인된 기록만 합산합니다.")
         composition=daily.groupby("날짜")[[name for name in ("input_tokens","output_tokens","cache_read_tokens","cache_creation_tokens") if name in daily]].sum(min_count=1).reset_index()
         if "input_tokens" in composition and "cache_read_tokens" in composition:
             creation=composition.get("cache_creation_tokens",0)
             composition["입력(캐시 제외)"]=(composition.input_tokens-composition.cache_read_tokens-creation).clip(lower=0)
             composition=composition.drop(columns=["input_tokens"])
-        st.plotly_chart(px.bar(composition,x="날짜",title="입력·출력·캐시 구성"),use_container_width=True)
+        components = [name for name in composition if name != "날짜"]
+        if components:
+            composition[components] = composition[components].apply(pd.to_numeric, errors="coerce").astype("Float64")
+            composition = composition.rename(columns={"output_tokens": "출력", "cache_read_tokens": "캐시 읽기", "cache_creation_tokens": "캐시 생성", "input_tokens": "입력"})
+            _chart(px.bar(composition,x="날짜",y=[name for name in composition if name != "날짜"],barmode="stack",labels={"value":"토큰","variable":"구성"}), "입력·출력·캐시 구성", "날짜별 토큰을 입력·출력·캐시 항목으로 나눠 표시합니다. 입력에서 확인된 캐시를 빼 중복을 줄이며, 미확인 값은 표시하지 않습니다.")
         paired=daily.dropna(subset=[name for name in ("input_tokens","cache_read_tokens") if name in daily])
         if not paired.empty and {"input_tokens","cache_read_tokens"} <= set(paired):
             ratios=paired.groupby("날짜")[["input_tokens","cache_read_tokens"]].sum().reset_index(); ratios["cache_ratio"]=ratios.cache_read_tokens/ratios.input_tokens.replace(0,pd.NA)*100
-            st.plotly_chart(px.line(ratios,x="날짜",y="cache_ratio",title="일별 가중 캐시 읽기 비율 (%)"),use_container_width=True)
+            _chart(px.line(ratios,x="날짜",y="cache_ratio",labels={"cache_ratio":"캐시 읽기 비율 (%)"}), "일별 가중 캐시 읽기 비율 (%)", "입력과 캐시 읽기가 모두 확인된 기록에서 캐시 읽기 합계를 입력 합계로 나눈 비율입니다.")
     daily_request=(view or {}).get("daily_request_duration")
     if daily_request is not None and not daily_request.empty:
-        st.plotly_chart(px.line(daily_request,x="date",y="duration_seconds",title="기간 내 작업 시간"),use_container_width=True)
+        _chart(_duration_line(daily_request), "기간 내 작업 시간", "요청 시간 중 선택 기간에 포함된 부분을 날짜별로 합산합니다. 시:분:초로 표시하며 동시에 진행된 요청 시간은 각각 더합니다.")
     elif not sessions.empty and {"started_at","last_activity"} <= set(sessions):
         timeline=sessions.dropna(subset=["started_at","last_activity"]).copy()
         if not timeline.empty:
@@ -129,25 +201,37 @@ def overview(snapshot,sessions,state,view=None):
             if not timeline.empty:
                 timeline["date"]=timeline.clip_start.dt.tz_convert(snapshot["timezone"]).dt.date
                 daily_duration=timeline.assign(duration_seconds=(timeline.clip_end-timeline.clip_start).dt.total_seconds()).groupby("date").duration_seconds.sum().reset_index()
-                st.plotly_chart(px.line(daily_duration,x="date",y="duration_seconds",title="기간 내 작업 시간"),use_container_width=True)
+                _chart(_duration_line(daily_duration), "기간 내 작업 시간", "요청 시간 정보가 없어 세션의 관측 구간으로 계산합니다. 선택 기간과 겹치는 시간을 시작 날짜별로 합산해 시:분:초로 표시합니다.")
     if not requests.empty:
         recent=(requests.sort_values("total_tokens",ascending=False,na_position="last",kind="stable") if "total_tokens" in requests else requests).head(10).copy()
         recent=pd.DataFrame({
             "제목": recent.get("title", recent.get("turn_id", pd.Series(index=recent.index, dtype=str))),
             "에이전트": recent.get("agent", pd.Series(index=recent.index, dtype=str)),
             "상태": recent.get("status", pd.Series(index=recent.index, dtype=str)),
-            "기간": recent.get("clipped_duration_seconds", pd.Series(index=recent.index, dtype=float)).map(lambda value: f"{value:.0f}초" if pd.notna(value) else "—"),
+            "작업 시간 (시:분:초)": recent.get("clipped_duration_seconds", pd.Series(index=recent.index, dtype=float)).map(duration_label),
             "토큰": recent.get("total_tokens", pd.Series(index=recent.index, dtype="Int64")).map(usage_label),
             "출처": recent.get("source_label", pd.Series(index=recent.index, dtype=str)),
         })
         st.subheader("요청 상위 10건")
-        st.dataframe(recent,use_container_width=True,hide_index=True)
-    st.dataframe(_scalar_table(sessions),use_container_width=True,hide_index=True); st.download_button("세션 CSV",export_csv(_scalar_table(sessions)),"sessions.csv","text/csv")
+        st.caption("선택 기간의 토큰 사용량이 큰 요청 10건입니다. 작업 시간은 기간에 포함된 구간만 시:분:초로 표시합니다.")
+        _table(recent,use_container_width=True,hide_index=True)
+    st.subheader("세션 목록"); st.caption("선택 기간에 활동한 세션의 제목·상태·출처를 확인하고 CSV로 내려받을 수 있습니다.")
+    _table(_scalar_table(sessions),use_container_width=True,hide_index=True); st.download_button("세션 CSV",export_csv(_scalar_table(sessions)),"sessions.csv","text/csv")
 
 @st.fragment(run_every="1s")
 def _live_monitor(agent: str, sid: str):
     from agent_monitor.service import poll_session
-    monitor_id=f"{agent}:{sid}"; snapshot=poll_session(sid,agent=agent); key=f"events:{monitor_id}"; generation_key=f"generation:{monitor_id}"
+    monitor_id=f"{agent}:{sid}"; final_key=f"completed-live:{monitor_id}"
+    final_snapshot = st.session_state.get(final_key)
+    dashboard = st.session_state.get("dashboard_snapshot", {})
+    if final_snapshot is not None and dashboard.get("generation", 0) > final_snapshot.get("generation", 0):
+        st.session_state.pop(final_key, None)
+        final_snapshot = None
+    snapshot=final_snapshot if final_snapshot is not None else poll_session(sid,agent=agent)
+    if agent == "codex" and any(get(record(session), "agent") == agent and get(record(session), "session_id") == sid and str(get(record(session), "status", default="")).lower() in {"complete", "completed"} for session in snapshot.get("sessions", [])):
+        st.session_state[final_key] = snapshot
+        st.info("Codex 작업이 완료되어 실시간 추적을 중지했습니다. 마지막 수집 로그를 표시합니다.")
+    key=f"events:{monitor_id}"; generation_key=f"generation:{monitor_id}"
     generation_changed=st.session_state.get(generation_key) not in (None,snapshot.get("generation"))
     if generation_changed:
         # Preserve the paused frozen display and baseline across replacement;
@@ -170,7 +254,7 @@ def _live_monitor(agent: str, sid: str):
         baseline=st.session_state.setdefault(basekey,received); frozen=st.session_state.setdefault(f"frozen:{monitor_id}",list(buffer)); display=frame(event_rows(monitor_view(buffer,frozen,st.session_state.get(f"limit:{monitor_id}",200),st.session_state.get(f"follow:{monitor_id}",True)),st.session_state.get(f"noise:{monitor_id}",True))); st.info(f"일시정지 — 새 이벤트 {received-baseline}건 수집됨")
     else:
         st.session_state.pop(basekey,None); st.session_state.pop(f"frozen:{monitor_id}",None); display=frame(event_rows(monitor_view(buffer,None,st.session_state.get(f"limit:{monitor_id}",200),st.session_state.get(f"follow:{monitor_id}",True)),st.session_state.get(f"noise:{monitor_id}",True)))
-    st.caption(f"수집 버퍼 {len(buffer)}/2,000건 · 화면 {len(display)}건"); st.dataframe(display,use_container_width=True,hide_index=True)
+    st.caption(f"수집 버퍼 {len(buffer)}/2,000건 · 화면 {len(display)}건"); _event_table(display, snapshot.get("timezone") or "UTC")
 
 def _history_events(snapshot, agent, sid, state):
     """Narrow transcript materialization to the selected composite session."""
@@ -189,65 +273,138 @@ def _history_events(snapshot, agent, sid, state):
 
 
 def history(snapshot,sessions,state,view=None):
-    st.header("작업 이력")
+    st.header("작업 이력"); st.caption("세션을 선택해 요청별 사용량, 메시지 기록, 실시간 이벤트를 확인합니다.")
     if sessions.empty: st.info("표시할 세션이 없습니다."); return
     query=st.text_input("세션 검색 (제목·ID·프로젝트)"); visible=sessions if not query else sessions[sessions.astype(str).apply(lambda row: row.str.contains(query,case=False,regex=False).any(),axis=1)]
-    page=st.number_input("페이지",min_value=1,value=1,step=1); start=(page-1)*50; st.caption(f"검색 결과 {len(visible)}건 · 페이지당 50건"); st.dataframe(visible.iloc[start:start+50],use_container_width=True,hide_index=True)
-    if visible.empty: return
-    choices=[(str(row.agent),str(row.session_id)) for row in visible.itertuples()]
-    choice=st.selectbox("세션",choices,format_func=lambda key: f"{key[0]} · {str(visible[(visible.agent.astype(str)==key[0]) & (visible.session_id.astype(str)==key[1])].iloc[0].get('title') or key[1])} · {key[1]}")
-    agent, sid=choice; item=sessions[(sessions.agent.astype(str)==agent) & (sessions.session_id.astype(str)==sid)].iloc[0].to_dict(); st.json({k:item.get(k) for k in ("agent","status","source_label","source_kind","source_path","sources","data_status")})
+    page=st.number_input("페이지",min_value=1,value=1,step=1); start=(page-1)*50; st.caption(f"검색 결과 {len(visible)}건 · 페이지당 50건")
+    zone = snapshot.get("timezone") or "UTC"
+    page_rows = visible.iloc[start:start+50].reset_index(drop=True)
+    if page_rows.empty:
+        st.info("이 페이지에 표시할 세션이 없습니다.")
+        return
+    table_key = "history-session-table"
+    table_context = tuple((str(row.get("agent")), str(row.get("session_id")), str(row.get("parent_session_id"))) for row in page_rows.to_dict("records"))
+    if st.session_state.get("history-table-context") != table_context:
+        st.session_state[table_key] = {"selection": {"cells": []}}
+        st.session_state["history-table-context"] = table_context
+    st.caption("세션 ID를 선택하면 해당 세션, 부모 ID를 선택하면 부모 세션의 상세를 아래에서 확인할 수 있습니다.")
+    selection = _table(page_rows,use_container_width=True,hide_index=True,
+                 key=table_key, on_select="rerun", selection_mode="single-cell",
+                 column_order=[name for name in ("session_id", "parent_session_id", "title", "agent", "status", "last_activity") if name in page_rows],
+                 column_config={"session_id":st.column_config.TextColumn("세션 ID", width="small", help="선택하면 해당 세션 상세로 이동합니다."),
+                                "parent_session_id":st.column_config.TextColumn("부모 ID", width="small", help="선택하면 같은 에이전트의 부모 세션 상세로 이동합니다."),
+                                "title":st.column_config.TextColumn("제목", width="medium"), "agent":st.column_config.TextColumn("에이전트", width="small"), "status":st.column_config.TextColumn("상태", width="small"),
+                                "last_activity":st.column_config.DatetimeColumn("최근 활동", format="MM-DD HH:mm", timezone=zone, width="medium")})
+    item = page_rows.iloc[0].to_dict()
+    choice = (str(item["agent"]), str(item["session_id"]))
+    cells = selection.selection.cells
+    if cells:
+        position, column = cells[-1]
+        if 0 <= position < len(page_rows):
+            row = page_rows.iloc[position]
+            target = row.get("parent_session_id") if column == "parent_session_id" else row.get("session_id")
+            if target is None or pd.isna(target) or not str(target):
+                st.info("이 세션에는 확인된 부모 세션이 없습니다.")
+                return
+            choice = (str(row.agent), str(target))
+            selected = sessions[(sessions.agent.astype(str)==choice[0]) & (sessions.session_id.astype(str)==choice[1])]
+            if selected.empty:
+                all_sessions = _scalar_table(snapshot.get("sessions", []))
+                if {"agent", "session_id"} <= set(all_sessions):
+                    selected = all_sessions[(all_sessions.agent.astype(str)==choice[0]) & (all_sessions.session_id.astype(str)==choice[1])]
+                if selected.empty:
+                    st.info("선택한 부모 세션의 로그를 찾을 수 없습니다.")
+                    return
+                st.info("부모 세션이 현재 필터 밖에 있습니다. 요청과 로그에는 현재 기간·필터가 적용됩니다.")
+            item = selected.iloc[0].to_dict()
+    agent, sid = choice
+    st.subheader("선택 세션 상세")
+    st.caption(f"{agent} · {item.get('title') or sid}")
+    with st.expander("세션 ID·출처 상세"):
+        st.caption(f"에이전트: {agent} · 출처: {item.get('source_label') or '—'} · 형식: {item.get('source_kind') or '—'}")
+        st.text("세션 ID"); st.code(sid, language=None, wrap_lines=True)
+        primary = item.get("source_path")
+        if primary:
+            st.text("대표 로그 파일"); st.code(str(primary), language=None, wrap_lines=True)
+        sources = item.get("sources")
+        additional = list(dict.fromkeys(str(path) for path in sources if path and str(path) != str(primary))) if isinstance(sources, (list, tuple)) else []
+        if additional:
+            st.text("함께 병합한 추가 로그 파일")
+            for path in additional:
+                st.code(path, language=None, wrap_lines=True)
+        st.caption("대표 파일과 추가 파일이 같은 세션의 기록으로 병합됩니다. 동일한 경로는 한 번만 표시합니다.")
     st.caption(f"직접 사용량 이벤트 {item.get('own_usage_count', 0)}건 · 하위 세션 사용량 이벤트 {item.get('child_usage_count', 0)}건")
     reqs=(view or {}).get("requests_df",pd.DataFrame()); reqs=reqs[(reqs.session_id.astype(str)==sid) & (reqs.agent.astype(str)==agent)] if {"session_id","agent"} <= set(reqs) else reqs
     monitor_id=f"{agent}:{sid}"; pane=st.radio("세션 보기",["요청","로그","실시간"],horizontal=True,key=f"history-pane:{monitor_id}")
     if pane == "요청":
-        st.subheader("요청 사용량·시간·상태"); st.dataframe(_scalar_table(reqs),use_container_width=True,hide_index=True); st.download_button("요청 CSV",export_csv(_scalar_table(reqs)),f"{sid}-requests.csv","text/csv")
+        st.subheader("요청 사용량·시간·상태"); st.caption("선택한 세션의 요청별 토큰·상태와 기간 내 작업 시간(시:분:초)입니다. CSV에서 추가 토큰 항목과 초 단위 원본 시간을 확인할 수 있습니다.")
+        request_table = _duration_table(reqs)
+        _table(request_table,use_container_width=True,hide_index=True,
+                     column_order=[name for name in ("title", "status", "기간 내 작업 시간 (시:분:초)", "input_tokens", "output_tokens", "total_tokens") if name in request_table],
+                     column_config={"title":st.column_config.TextColumn("요청", width="medium"), "status":st.column_config.TextColumn("상태", width="small"),
+                                    "기간 내 작업 시간 (시:분:초)":st.column_config.TextColumn("작업 시간 (시:분:초)", width="medium"),
+                                    "input_tokens":st.column_config.NumberColumn("입력", width="small"), "output_tokens":st.column_config.NumberColumn("출력", width="small"), "total_tokens":st.column_config.NumberColumn("전체", width="small")})
+        st.download_button("요청 CSV",export_csv(_scalar_table(reqs)),f"{sid}-requests.csv","text/csv")
     elif pane == "로그":
         raw_events=_history_events(snapshot,agent,sid,state)
         hide_noise=st.toggle("노이즈 이벤트 숨기기",value=True,key=f"history-noise:{monitor_id}")
         normalized=frame(event_rows(raw_events.to_dict("records"),hide_noise))
-        st.subheader("정규화된 메시지 이벤트"); st.dataframe(normalized,use_container_width=True,hide_index=True)
+        st.subheader("정규화된 메시지 이벤트"); st.caption("선택 기간에 기록된 사용자·응답·도구 메시지입니다. 아래 최근 20건을 펼치면 미리보기·출처와 원시 JSON 조회 버튼이 나타납니다."); _event_table(normalized, zone)
         for event in normalized.tail(20).to_dict("records"):
             with st.expander(f"{event.get('occurred_at','')} · {event.get('source_label','')} · {event.get('record_key','')}"):
-                st.text(lazy_preview(event)); st.caption("원시 JSON은 자동으로 읽지 않습니다.")
+                st.text(lazy_preview(event)); st.caption(f"출처: {event.get('source_label') or '—'} · 기록: {event.get('record_key') or '—'}")
+                if event.get("source_path"):
+                    st.code(str(event["source_path"]), language=None, wrap_lines=True)
+                st.caption("원시 JSON은 자동으로 읽지 않습니다.")
                 if st.button("원시 JSON 불러오기", key=f"raw:{choice}:{event.get('event_id') or event.get('record_key')}"):
                     from agent_monitor.service import raw_event
                     st.json(raw_event(agent, sid, str(event.get("source_path")), str(event.get("record_key"))) or {})
     else:
-        st.subheader("실시간 이벤트")
+        if agent == "codex" and str(item.get("status", "")).lower() in {"complete", "completed"}:
+            st.info("완료된 Codex 세션은 실시간 추적하지 않습니다. 로그 보기에서 수집된 기록을 확인하세요.")
+            return
+        st.subheader("실시간 이벤트"); st.caption("선택 로그를 1초마다 확인합니다. 일시정지는 화면만 멈추며, 수집된 새 이벤트는 재개할 때 표시합니다.")
         a,b,c,d=st.columns(4); a.toggle("일시정지",key=f"pause:{monitor_id}"); b.toggle("최신 이벤트 따라가기",value=True,key=f"follow:{monitor_id}"); c.toggle("노이즈 숨기기",value=True,key=f"noise:{monitor_id}"); d.selectbox("표시 건수",[50,100,200,500],index=2,key=f"limit:{monitor_id}")
         _live_monitor(agent, sid)
 
 def analysis(snapshot,sessions,state,view=None):
-    view=view or {}; st.header("기간 분석"); usage=view.get("usage_df",pd.DataFrame())
+    view=view or {}; st.header("기간 분석"); st.caption("선택 기간의 토큰 사용량과 요청 시간을 비교합니다. 모든 작업 시간 표시는 시:분:초 형식입니다."); usage=view.get("usage_df",pd.DataFrame())
     if usage.empty: st.info("분석할 사용량이 없습니다."); return
-    group=st.selectbox("비교 기준",[x for x in ("agent","model","source_label") if x in usage]); grouped=usage.groupby(group,dropna=False).total_tokens.sum(min_count=1).reset_index(); st.plotly_chart(px.bar(grouped,x=group,y="total_tokens"),use_container_width=True)
-    comparison=view.get("comparison")
-    if comparison is None:
-        previous_start, previous_end = prior_period(state["start"], state["end"])
-        all_sessions=frame(snapshot["sessions"]); previous_sessions=filtered_sessions(all_sessions,previous_start,previous_end,state["agents"],state["projects"])
-        previous_usage=filtered_usage(snapshot["usage"],previous_start,previous_end,state["agents"],state["projects"],state["models"],previous_sessions)
-        comparison, sentence=comparison_summary(usage,previous_usage)
-    else:
-        sentence="현재 보기 데이터와 직전 동일 기간을 비교합니다."
-    st.subheader("직전 동일 기간 비교"); st.dataframe(comparison,hide_index=True); st.caption(sentence)
+    left, right = st.columns(2)
+    labels = {"agent":"에이전트", "model":"모델", "source_label":"출처", "bucket":"기간 시작", "total_tokens":"토큰"}
+    group=left.selectbox("비교 기준",[x for x in ("agent","model","source_label") if x in usage], format_func=lambda value: labels[value],help="각 기간 안에서 에이전트·모델·출처별 사용량을 나란히 비교합니다.")
+    granularity=right.selectbox("집계 단위",["일별","주별","월별"],help="설정 시간대 기준입니다. 주는 월요일부터 일요일, 월은 1일부터 묶습니다.")
+    time_usage=usage.dropna(subset=["occurred_at"]).copy()
+    frequency={"일별":"D", "주별":"W-SUN", "월별":"M"}[granularity]
+    local_time=time_usage.occurred_at.dt.tz_convert(snapshot["timezone"]).dt.tz_localize(None)
+    time_usage["bucket"]=local_time.dt.to_period(frequency).dt.start_time
+    time_usage[group]=time_usage[group].fillna("미확인").astype(str)
+    grouped=time_usage.groupby(["bucket",group],dropna=False).total_tokens.sum(min_count=1).reset_index()
+    category_chart = px.bar(grouped,x="bucket",y="total_tokens",color=group,barmode="group",labels=labels)
+    category_chart.update_xaxes(tickmode="array",tickvals=grouped.bucket.drop_duplicates(),tickformat="%Y-%m" if granularity=="월별" else "%Y-%m-%d")
+    _chart(category_chart, "기준별 토큰 사용량", f"{granularity}로 {labels[group]}별 사용량을 비교합니다. 주는 월요일, 월은 1일 기준이며 선택 기간 안의 기록만 합산합니다.")
     duration=(view or {}).get("requests_df",pd.DataFrame()).get("clipped_duration_seconds",pd.Series(dtype=float)).dropna()
     cache_ratio=weighted_cache_ratio(usage); errors=frame(snapshot["diagnostics"])
-    coverage=f"{usage.total_tokens.notna().sum()}/{len(usage)}" if "total_tokens" in usage else "0/0"; stats=pd.DataFrame({"항목":["평균 작업 시간(초)","P90 작업 시간(초)","캐시 읽기 비율","진단/오류","사용량 적용 범위"],"값":[duration.mean() if not duration.empty else None,duration.quantile(.9) if not duration.empty else None,(cache_ratio*100) if cache_ratio is not None else None,len(errors),coverage]}); st.dataframe(stats,hide_index=True)
-    granularity=st.selectbox("시간 단위",["시간","일","주","월"]); time_usage=usage.dropna(subset=["occurred_at"]).copy(); freq={"시간":"h","일":"D","주":"W-SUN","월":"M"}[granularity]; time_usage["bucket"]=time_usage.occurred_at.dt.tz_convert(snapshot["timezone"]).dt.to_period(freq).dt.start_time; st.plotly_chart(px.bar(time_usage.groupby("bucket").total_tokens.sum(min_count=1).reset_index(),x="bucket",y="total_tokens",title=f"{granularity}별 토큰"),use_container_width=True)
-    if not duration.empty: st.plotly_chart(px.histogram(duration,x=duration,title="작업 시간 분포"),use_container_width=True)
-    markdown="# Agent Session Monitor 기간 분석\n\n" + f"기간: {state['start'].isoformat()} ~ {state['end'].isoformat()}\n\n" + sentence + "\n\n## 비교\n\n```csv\n" + comparison.to_csv(index=False) + "```\n\n## 품질 및 작업 시간\n\n```csv\n" + stats.to_csv(index=False) + "```"
+    coverage=f"{usage.total_tokens.notna().sum()}/{len(usage)}" if "total_tokens" in usage else "0/0"; stats=pd.DataFrame({"항목":["평균 작업 시간 (시:분:초)","P90 작업 시간 (시:분:초)","캐시 읽기 비율","진단/오류","사용량 적용 범위"],"값":[duration_label(duration.mean()),duration_label(duration.quantile(.9)),f"{cache_ratio*100:.1f}%" if cache_ratio is not None else "—",str(len(errors)),coverage]}); st.subheader("작업 시간·데이터 품질"); st.caption("P90은 요청 90%가 이 시간 이내에 끝났다는 뜻입니다. 적용 범위는 전체 사용량 기록 중 토큰이 확인된 기록 수이며, 진단 수는 전체 수집 기준입니다."); _table(stats.set_index("항목").T,hide_index=True,use_container_width=True)
+    total_chart = px.bar(time_usage.groupby("bucket").total_tokens.sum(min_count=1).reset_index(),x="bucket",y="total_tokens",labels=labels)
+    total_chart.update_xaxes(tickmode="array",tickvals=grouped.bucket.drop_duplicates(),tickformat="%Y-%m" if granularity=="월별" else "%Y-%m-%d")
+    _chart(total_chart, f"{granularity} 전체 토큰", "위에서 선택한 집계 단위로 전체 토큰의 추이를 표시합니다. CSV에도 같은 집계 단위와 비교 기준이 적용됩니다.")
+    if not duration.empty:
+        distribution = _duration_axis(px.histogram(x=duration, labels={"y":"요청 수"}), duration, axis="x")
+        distribution.update_traces(hovertemplate="요청 수: %{y}건<extra></extra>")
+        _chart(distribution, "작업 시간 분포", "선택 기간에 포함된 요청 시간을 구간별로 묶은 분포입니다. 가로축은 시:분:초, 세로축은 각 구간의 요청 수입니다.")
+    markdown="# Agent Session Monitor 기간 분석\n\n" + f"기간: {state['start'].isoformat()} ~ {state['end'].isoformat()}\n집계: {granularity} · {labels[group]}\n\n" + "\n\n## 기준별 토큰 사용량\n\n```csv\n" + grouped.to_csv(index=False) + "```\n\n## 품질 및 작업 시간\n\n```csv\n" + stats.to_csv(index=False) + "```"
     st.download_button("분석 CSV",export_csv(grouped),"analysis.csv","text/csv"); st.download_button("분석 Markdown",markdown,"analysis.md","text/markdown")
 
 def settings(snapshot,sessions,state):
     from agent_monitor.config import default_config, load_config, normalized_timezone, save_config
     from agent_monitor.service import reload_config, update_config
-    st.header("설정 · 출처 · 진단")
+    st.header("설정 · 출처 · 진단"); st.caption("로그를 읽을 경로와 표시 시간대를 설정합니다. 진단에서 파일 접근 문제와 지원되지 않는 로그 형식을 확인할 수 있습니다.")
     config=load_config(); paths=pd.DataFrame([{"agent":a,"path":p} for a, ps in config["paths"].items() for p in ps],columns=["agent","path"])
     timezone_name=st.text_input("IANA timezone", value=snapshot.get("timezone") or config.get("timezone") or "UTC")
     normalized_tz, timezone_error=normalized_timezone({"timezone":timezone_name})
     if timezone_error: st.error(timezone_error["message"])
-    edited=st.data_editor(paths,use_container_width=True,hide_index=True,num_rows="dynamic",key="paths-editor")
+    edited=st.data_editor(paths,use_container_width=True,hide_index=True,num_rows="dynamic",key="paths-editor",column_config={name:{"help":COLUMN_HELP[name]} for name in ("agent","path")})
     left,middle,right=st.columns(3)
     if left.button("설정 저장"):
         if timezone_error:
@@ -260,9 +417,9 @@ def settings(snapshot,sessions,state):
         restored=default_config(); save_config(restored); reload_config(restored); st.success("기본 경로를 복원했습니다.")
     if right.button("전체 재스캔"):
         reload_config(config); _snapshot(force=True); st.rerun()
-    st.subheader("현재 수집 경로"); st.dataframe(frame([{**row,"source_path":row["path"]} for row in paths.to_dict("records")]),use_container_width=True,hide_index=True)
-    st.subheader("진단"); st.dataframe(frame(snapshot["diagnostics"]),use_container_width=True,hide_index=True)
-    st.subheader("설정 진단"); st.dataframe(frame(snapshot.get("config_diagnostics",[])),use_container_width=True,hide_index=True)
+    st.subheader("현재 수집 경로"); st.caption("에이전트별로 수집하도록 설정된 폴더입니다. AGY는 각 설치 폴더의 brain/<세션 ID>/.system_generated/logs/transcript.jsonl을 읽습니다. 설치 폴더와 brain 폴더를 모두 경로로 지정할 수 있습니다."); _table(paths,use_container_width=True,hide_index=True)
+    st.subheader("진단"); st.caption("파일을 읽거나 로그를 해석하는 과정에서 발견한 문제입니다. 항목이 없으면 이번 수집에서 보고된 문제가 없습니다."); _table(frame(snapshot["diagnostics"]),use_container_width=True,hide_index=True,column_config={"message":{"help":"진단의 원인과 수집에 미치는 영향입니다."}})
+    st.subheader("설정 진단"); st.caption("경로 존재 여부·접근 권한·시간대 설정을 검사한 결과입니다. 경로 문제로 수집되지 않은 데이터가 있을 수 있습니다."); _table(frame(snapshot.get("config_diagnostics",[])),use_container_width=True,hide_index=True,column_config={"message":{"help":"경로·권한·시간대 설정에서 발견한 문제입니다."}})
 
 def orchestration_legacy(snapshot,sessions,state):
     st.header("오케스트레이션")
@@ -271,11 +428,10 @@ def orchestration_legacy(snapshot,sessions,state):
     roots=int((rows.relationship=="root").sum()); children=int((rows.relationship=="child").sum())
     a,b,c=st.columns(3); a.metric("루트 세션",roots); b.metric("하위 세션",children); c.metric("평균 하위 세션",f"{children / roots:.1f}" if roots else "—")
     cols=[x for x in ("relationship","depth","session_id","parent_session_id","agent","title","status","source_label","source_path","last_activity") if x in rows]
-    st.dataframe(rows[cols].sort_values(["depth","last_activity"] if "last_activity" in rows else ["depth"]),use_container_width=True,hide_index=True)
+    _table(rows[cols].sort_values(["depth","last_activity"] if "last_activity" in rows else ["depth"]),use_container_width=True,hide_index=True)
     if "last_activity" in rows and rows.last_activity.notna().any(): st.plotly_chart(px.scatter(rows.dropna(subset=["last_activity"]),x="last_activity",y="depth",color="relationship",hover_data=[x for x in ("session_id","parent_session_id","title") if x in rows],title="세션 계층 타임라인"),use_container_width=True)
     selected=st.selectbox("드릴다운 세션",rows.session_id.astype(str)); detail=rows[rows.session_id.astype(str)==selected].iloc[0].to_dict(); descendants=rows[rows.parent_session_id.astype(str)==selected] if "parent_session_id" in rows else pd.DataFrame()
-    st.json(detail); st.subheader("직접 하위 세션"); st.dataframe(descendants,use_container_width=True,hide_index=True)
-    st.download_button("계층 CSV",export_csv(rows),"orchestration.csv","text/csv")
+    st.json(detail); st.subheader("직접 하위 세션"); _table(descendants,use_container_width=True,hide_index=True)
 
 def orchestration(snapshot, sessions, state, view=None):
     """Render only the collector's evidence-qualified graph contract."""
@@ -292,12 +448,14 @@ def orchestration(snapshot, sessions, state, view=None):
     session_times = frame(snapshot["sessions"])
     if not data.empty and {"agent", "session_id"} <= set(session_times):
         data = data.merge(session_times[[name for name in ("agent", "session_id", "started_at", "last_activity", "title", "status") if name in session_times]], on=["agent", "session_id"], how="left")
-    st.header("Orchestration")
+    st.header("Orchestration"); st.caption("로그에 명시된 부모·자식 관계로 세션 계층을 표시합니다. 토큰과 작업 시간 집계에는 현재 기간·필터가 적용됩니다.")
     a, b, c, d = st.columns(4)
-    a.metric("Roots", len(graph.get("roots", [])))
-    b.metric("Relations", graph.get("relation_count", 0))
-    c.metric("Missing parents", graph.get("missing_parent_count", 0))
-    d.metric("Cycles", graph.get("cycle_count", 0))
+    a.metric("Roots", len(graph.get("roots", [])), help="부모가 없는 최상위 세션 수입니다.")
+    b.metric("Relations", graph.get("relation_count", 0), help="로그 근거가 확인된 부모·자식 연결 수입니다.")
+    c.metric("Missing parents", graph.get("missing_parent_count", 0), help="참조한 부모 기록을 찾지 못한 세션 수입니다.")
+    d.metric("Cycles", graph.get("cycle_count", 0), help="부모·자식 관계가 순환하는 오류 수입니다.")
+    for column, description in zip((a,b,c,d), ("부모가 없는 최상위 세션 수", "근거가 확인된 부모·자식 연결 수", "부모 기록을 찾지 못한 세션 수", "관계가 순환하는 오류 수")):
+        column.caption(description)
     roots = [(agent, sid) for agent, sid in graph.get("roots", [])]
     subtree=data; keys=[]
     if roots:
@@ -305,7 +463,7 @@ def orchestration(snapshot, sessions, state, view=None):
         selected_key = tuple(selected)
         keys = subtree_keys(graph, selected_key)
         subtree = data[data.apply(lambda row: (row.get("agent"), row.get("session_id")) in keys, axis=1)]
-        st.subheader("선택한 루트의 전체 하위 트리")
+        st.subheader("선택한 루트의 전체 하위 트리"); st.caption("들여쓰기는 세션 깊이입니다. 직접 토큰은 해당 세션, 하위 토큰은 자손, 전체 토큰은 둘의 합이며 작업 시간은 겹친 구간을 한 번만 셉니다.")
         tree_rows = subtree.copy()
         order = {key: index for index, key in enumerate(keys)}
         tree_rows["_tree_order"] = tree_rows.apply(lambda row: order[(row.get("agent"), row.get("session_id"))], axis=1)
@@ -317,26 +475,45 @@ def orchestration(snapshot, sessions, state, view=None):
                            for depth, title, session_id in zip(depths, titles, tree_rows["session_id"])]
         for source, label in (("own_total", "직접 토큰"), ("descendant_total", "하위 토큰"), ("total_tokens", "전체 토큰")):
             tree_rows[label] = pd.to_numeric(tree_rows[source], errors="coerce").astype("Int64") if source in tree_rows else pd.Series(pd.NA, index=tree_rows.index, dtype="Int64")
-        columns = [name for name in ("제목", "직접 토큰", "하위 토큰", "전체 토큰", "agent", "session_id", "status", "source_label", "source_path") if name in tree_rows]
-        st.dataframe(tree_rows[columns], use_container_width=True, hide_index=True)
+        if "duration_seconds" in tree_rows:
+            tree_rows["작업 시간 (시:분:초)"] = tree_rows.duration_seconds.map(duration_label)
+        columns = [name for name in ("제목", "직접 토큰", "하위 토큰", "전체 토큰", "작업 시간 (시:분:초)", "agent", "session_id", "status", "source_label", "source_path") if name in tree_rows]
+        _table(tree_rows[columns], use_container_width=True, hide_index=True)
         node=st.selectbox("세션 드릴다운", keys, format_func=lambda value: f"{value[0]} · {value[1]}")
-        st.json(subtree[(subtree.agent==node[0]) & (subtree.session_id==node[1])].iloc[0].to_dict())
-        if st.toggle("실시간 로그 보기", value=False, key=f"graph-live:{node[0]}:{node[1]}"):
+        st.caption("선택 세션의 상세 집계입니다. 시간은 시:분:초로 표시하며, 알 수 없는 사용량은 비워 둡니다."); st.json(_duration_table(subtree[(subtree.agent==node[0]) & (subtree.session_id==node[1])]).iloc[0].to_dict())
+        selected_status = subtree[(subtree.agent==node[0]) & (subtree.session_id==node[1])].iloc[0].get("status")
+        completed = node[0] == "codex" and str(selected_status).lower() in {"complete", "completed"}
+        if completed:
+            st.caption("완료된 Codex 세션은 실시간 추적하지 않습니다.")
+        if st.toggle("실시간 로그 보기", value=False, disabled=completed, key=f"graph-live:{node[0]}:{node[1]}") and not completed:
             _live_monitor(node[0], node[1])
-    else: st.dataframe(data, use_container_width=True, hide_index=True)
-    if {"started_at", "last_activity"} <= set(subtree) and subtree.started_at.notna().any():
-        timeline = subtree.dropna(subset=["started_at", "last_activity"]).copy()
-        if not timeline.empty:
-            timeline["lane"] = timeline.agent.astype(str) + ":" + timeline.session_id.astype(str)
-            st.plotly_chart(px.timeline(timeline, x_start="started_at", x_end="last_activity", y="lane", color="depth", hover_data=[name for name in ("session_count", "usage_event_count", "total_tokens", "cache_read_tokens", "duration_seconds") if name in timeline]), use_container_width=True)
-    st.subheader("Evidence-qualified edges")
+    else: _table(_duration_table(data), use_container_width=True, hide_index=True)
+    timeline = request_timeline((view or {}).get("requests_df", pd.DataFrame()), keys, state.get("start"), state.get("end"))
+    if not timeline.empty:
+        zone = snapshot.get("timezone", "UTC")
+        timeline["lane"] = timeline.agent.astype(str) + ":" + timeline.session_id.astype(str)
+        timeline["작업 시간"] = timeline.clipped_duration_seconds.map(duration_label)
+        timeline["요청"] = timeline.get("title", timeline["turn_id"]).fillna(timeline["turn_id"]).astype(str)
+        timeline["status"] = timeline.get("status", pd.Series("미확인", index=timeline.index)).fillna("미확인")
+        # Plotly dates have no configurable display timezone: convert once for both axis and hover.
+        for name in ("clip_start", "clip_end"):
+            timeline[name] = timeline[name].dt.tz_convert(zone).dt.tz_localize(None)
+        figure = px.timeline(timeline, x_start="clip_start", x_end="clip_end", y="lane", color="status",
+                             custom_data=["요청", "작업 시간", "clip_start", "clip_end"],
+                             category_orders={"lane":[f"{agent}:{sid}" for agent,sid in keys]}, labels={"lane":"세션", "status":"상태"})
+        figure.update_traces(marker_line_width=1, marker_line_color="white",
+                             hovertemplate="세션: %{y}<br>요청: %{customdata[0]}<br>작업 시간: %{customdata[1]}<br>시작: %{customdata[2]}<br>종료: %{customdata[3]}<extra>%{fullData.name}</extra>")
+        figure.update_layout(barmode="overlay", xaxis_title=f"시각 ({zone})")
+        figure.update_yaxes(autorange="reversed", categoryorder="array", categoryarray=[f"{agent}:{sid}" for agent,sid in keys])
+        _chart(figure, "세션 실행 타임라인", "요청마다 막대를 나눠 요청 사이 공백과 세션 간 겹침을 표시합니다. 선택 기간 안의 관측 구간이며, 막대에 마우스를 올리면 요청·시작·종료·작업 시간을 볼 수 있습니다.")
+    else:
+        st.subheader("세션 실행 타임라인")
+        st.info("선택 기간에 시작·종료 시각이 확인된 요청 구간이 없습니다.")
+    st.subheader("Evidence-qualified edges"); st.caption("명시적 로그 근거로 확인된 부모·자식 연결입니다. 같은 세션 ID라도 에이전트가 다르면 별도로 취급합니다.")
     edges=pd.DataFrame(graph.get("edges", []))
     if keys and not edges.empty and {"child","parent"} <= set(edges): edges=edges[edges.child.apply(tuple).isin(keys) & edges.parent.apply(tuple).isin(keys)]
-    st.dataframe(edges, use_container_width=True, hide_index=True)
+    _table(edges, use_container_width=True, hide_index=True)
     st.caption(f"Missing placeholders: {graph.get('missing_placeholders', [])}")
-    markdown="# 오케스트레이션\n\n```csv\n" + subtree.to_csv(index=False) + "```"
-    st.download_button("Graph CSV", export_csv(subtree), "orchestration.csv", "text/csv")
-    st.download_button("Graph Markdown", markdown, "orchestration.md", "text/markdown")
 
 def run():
     st.set_page_config(page_title="Agent Session Monitor",layout="wide")

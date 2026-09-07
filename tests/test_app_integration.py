@@ -76,9 +76,9 @@ requests = pd.DataFrame([{"title": "unknown-first", "agent": "codex", "status": 
 ui.overview({"timezone": "UTC"}, pd.DataFrame(), {"start": None, "end": None}, {"requests_df": requests, "usage_df": pd.DataFrame(), "summary": {}})'''
     app = AppTest.from_string(source).run(timeout=20)
     assert not app.exception
-    table = next(element.value for element in app.dataframe if list(element.value.columns) == ["제목", "에이전트", "상태", "기간", "토큰", "출처"])
+    table = next(element.value for element in app.dataframe if list(element.value.columns) == ["제목", "에이전트", "상태", "작업 시간 (시:분:초)", "토큰", "출처"])
     assert table.shape == (10, 6)
-    assert table.iloc[0].to_dict() == {"제목": "request-10", "에이전트": "codex", "상태": "completed", "기간": "10초", "토큰": "10", "출처": "codex"}
+    assert table.iloc[0].to_dict() == {"제목": "request-10", "에이전트": "codex", "상태": "completed", "작업 시간 (시:분:초)": "00:00:10", "토큰": "10", "출처": "codex"}
     assert table["제목"].tolist() == [f"request-{index}" for index in range(10, 1, -1)] + ["unknown-first"]
     assert table.iloc[-1]["토큰"] == "—"
 
@@ -104,7 +104,8 @@ def test_populated_rollup_period_and_day_split_contract():
     assert (rollup["own_total"], rollup["descendant_total"], rollup["total_tokens"]) == (10, 50, 60)
     assert rollup["cache_read_ratio"] == 0.5
     assert rollup["coverage"] == {"known_total_events": 3, "usage_events": 3}
-    assert view["comparison"].iloc[0].to_dict() == {"current_total": 60, "previous_total": 40}
+    assert "comparison" not in view
+    assert view["summary"]["total_tokens"] == 60
     assert view["daily_request_duration"].duration_seconds.tolist() == [3600.0, 3600.0]
 
 
@@ -125,6 +126,8 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     import agent_monitor.ui.app as ui
 
     initial = _snapshot()
+    for session in initial["sessions"]:
+        session["status"] = "active_inferred"
     for index, event in enumerate(initial["events"], 1):
         event.update({"source_path": "synthetic.jsonl", "record_key": str(index)})
     current = {"value": initial}
@@ -179,3 +182,167 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     refresh = next(toggle for toggle in app.toggle if toggle.label == "고급: 전체 화면 5초 자동 새로고침")
     refresh.set_value(True).run(timeout=20)
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "162"
+
+
+def test_duration_labels_and_composition_chart_use_values_and_explanations(monkeypatch):
+    import agent_monitor.ui.app as ui
+
+    captured = {}
+    original_chart = ui._chart
+
+    def chart(figure, title, description):
+        captured[title] = figure
+        original_chart(figure, title, description)
+
+    monkeypatch.setattr(ui, "_chart", chart)
+    monkeypatch.setattr(ui, "_snapshot", lambda force=False: _snapshot())
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
+    assert not app.exception
+    assert next(metric for metric in app.metric if metric.label == "평균 작업 시간").value == "02:00:00"
+    metrics = {metric.label: metric.value for metric in app.metric}
+    assert {label: metrics[label] for label in ("전체 토큰", "입력 토큰", "출력 토큰", "평균 입력 토큰", "평균 출력 토큰")} == {"전체 토큰": "63", "입력 토큰": "60", "출력 토큰": "3", "평균 입력 토큰": "20.0", "평균 출력 토큰": "1.0"}
+    assert "입력 / 출력" not in metrics
+    composition = captured["입력·출력·캐시 구성"]
+    assert composition.layout.yaxis.title.text == "토큰"
+    assert {trace.name: sum(trace.y) for trace in composition.data} == {"입력(캐시 제외)": 30, "출력": 3, "캐시 읽기": 30}
+    assert composition.layout.barmode == "stack"
+    duration = captured["기간 내 작업 시간"]
+    assert "시:분:초" in duration.layout.yaxis.title.text
+    assert all(label.count(":") == 2 for label in duration.layout.yaxis.ticktext)
+    assert all(value[0].count(":") == 2 for value in duration.data[0].customdata)
+    assert any("날짜별 토큰을 입력·출력·캐시" in caption.value for caption in app.caption)
+    next(radio for radio in app.radio if radio.label == "메뉴").set_value("작업 이력").run(timeout=20)
+    assert not app.exception
+    requests = next(element.value for element in app.dataframe if "기간 내 작업 시간 (시:분:초)" in element.value)
+    assert requests["기간 내 작업 시간 (시:분:초)"].tolist() == ["02:00:00"]
+    next(radio for radio in app.radio if radio.label == "메뉴").set_value("기간 분석").run(timeout=20)
+    assert not app.exception
+    stats = next(element.value for element in app.dataframe if "평균 작업 시간 (시:분:초)" in element.value).T
+    assert stats.loc["평균 작업 시간 (시:분:초)", "값"] == "02:00:00"
+    assert stats.loc["P90 작업 시간 (시:분:초)", "값"] == "02:00:00"
+    distribution = captured["작업 시간 분포"]
+    assert distribution.layout.xaxis.title.text == "작업 시간 (시:분:초)"
+
+
+def test_overview_token_averages_exclude_unknown_requests_and_include_zero():
+    source = """import pandas as pd
+import agent_monitor.ui.app as ui
+requests=pd.DataFrame({"input_tokens":[10, None, 0],"output_tokens":[None, None, None]})
+ui.overview({"timezone":"UTC"}, pd.DataFrame(), {}, {"requests_df":requests,"summary":{},"usage_df":pd.DataFrame()})
+"""
+    app = AppTest.from_string(source).run(timeout=20)
+    assert not app.exception
+    metrics = {metric.label: metric.value for metric in app.metric}
+    assert metrics["평균 입력 토큰"] == "5.0"
+    assert metrics["평균 출력 토큰"] == "—"
+
+
+def test_analysis_groups_categories_by_local_day_week_month(monkeypatch):
+    import pandas as pd
+    import agent_monitor.ui.app as ui
+    from agent_monitor.ui.adapter import frame
+
+    start=datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end=datetime(2026, 10, 1, tzinfo=timezone.utc)
+    snapshot={"timezone":"Asia/Seoul", "sessions":[], "requests":[], "events":[], "diagnostics":[], "paths":{}, "scanned_at":start,
+              "usage":[{"agent":agent,"session_id":agent,"turn_id":"t","event_id":str(index),"occurred_at":at,"total_tokens":total}
+                       for index,(agent,at,total) in enumerate([
+                           ("codex", datetime(2026,8,30,16,tzinfo=timezone.utc),10),
+                           ("claude",datetime(2026,8,30,17,tzinfo=timezone.utc),20),
+                           ("codex",datetime(2026,8,31,16,tzinfo=timezone.utc),30),
+                           ("codex",datetime(2026,9,7,16,tzinfo=timezone.utc),40)])]}
+    view={"usage_df":frame(snapshot["usage"]),"requests_df":pd.DataFrame()}
+    monkeypatch.setattr(ui,"_snapshot",lambda force=False:snapshot)
+    monkeypatch.setattr(ui,"_filters",lambda snapshot:(pd.DataFrame(),{"page":"기간 분석","start":start,"end":end,"agents":[],"projects":[],"models":[]}))
+    monkeypatch.setattr(ui,"_view",lambda snapshot,state:view)
+    charts={}
+    original=ui._chart
+    def chart(figure,title,description):
+        charts[title]=figure
+        original(figure,title,description)
+    monkeypatch.setattr(ui,"_chart",chart)
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
+    def points():
+        return {(trace.name,pd.Timestamp(date).strftime("%Y-%m-%d")):int(value) for trace in charts["기준별 토큰 사용량"].data for date,value in zip(trace.x,trace.y)}
+    assert not app.exception
+    assert points()=={("codex","2026-08-31"):10,("claude","2026-08-31"):20,("codex","2026-09-01"):30,("codex","2026-09-08"):40}
+    next(select for select in app.selectbox if select.label=="집계 단위").set_value("주별").run(timeout=20)
+    assert not app.exception
+    assert points()=={("codex","2026-08-31"):40,("claude","2026-08-31"):20,("codex","2026-09-07"):40}
+    next(select for select in app.selectbox if select.label=="집계 단위").set_value("월별").run(timeout=20)
+    assert not app.exception
+    assert points()=={("codex","2026-08-01"):10,("claude","2026-08-01"):20,("codex","2026-09-01"):70}
+
+
+def test_composition_chart_keeps_missing_cache_components_unknown(monkeypatch):
+    import pandas as pd
+    import agent_monitor.ui.app as ui
+
+    snapshot = _snapshot()
+    for usage in snapshot['usage']:
+        usage['cache_creation_tokens'] = None
+    captured = {}
+    original = ui._chart
+    def chart(figure, title, description):
+        captured[title] = figure
+        original(figure, title, description)
+    monkeypatch.setattr(ui, '_chart', chart)
+    monkeypatch.setattr(ui, '_snapshot', lambda force=False: snapshot)
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / 'app.py').run(timeout=20)
+    assert not app.exception
+    traces = {trace.name: trace for trace in captured['입력·출력·캐시 구성'].data}
+    assert sum(traces['출력'].y) == 3 and sum(traces['캐시 읽기'].y) == 30
+    assert all(pd.isna(value) for value in traces['캐시 생성'].y)
+    assert all(pd.isna(value) for value in traces['입력(캐시 제외)'].y)
+    assert captured['일별 전체 토큰'].layout.title.text == ''
+
+
+def test_request_timeline_preserves_gaps_and_removed_exports(monkeypatch):
+    import pandas as pd
+    import agent_monitor.ui.app as ui
+
+    snapshot = _snapshot()
+    start = snapshot["requests"][0]["started_at"]
+    snapshot["requests"] = [
+        {"agent":"codex", "session_id":"root", "turn_id":str(index), "title":f"request {index}",
+         "started_at":start+timedelta(minutes=minute), "ended_at":start+timedelta(minutes=minute+5), "status":"completed"}
+        for index,minute in enumerate((0,30))]
+    captured = {}
+    original = ui._chart
+    def chart(figure,title,description):
+        captured[title] = figure
+        original(figure,title,description)
+    monkeypatch.setattr(ui,"_chart",chart)
+    monkeypatch.setattr(ui,"_snapshot",lambda force=False:snapshot)
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
+    next(radio for radio in app.radio if radio.label=="메뉴").set_value("오케스트레이션").run(timeout=20)
+    assert not app.exception
+    assert captured["세션 실행 타임라인"].layout.yaxis.categoryarray == ("codex:root", "codex:middle", "codex:leaf")
+    trace=captured["세션 실행 타임라인"].data[0]
+    assert list(trace.x)==[300000,300000]
+    assert pd.Timestamp(trace.base[1])-pd.Timestamp(trace.base[0])==timedelta(minutes=30)
+    assert [row[1] for row in trace.customdata]==["00:05:00","00:05:00"]
+    assert not app.get("download_button")
+    next(radio for radio in app.radio if radio.label=="메뉴").set_value("기간 분석").run(timeout=20)
+    assert not app.exception
+    assert not any("직전" in item.value for item in app.subheader)
+    assert all("previous_total" not in element.value for element in app.dataframe)
+
+
+def test_visible_table_headers_and_metrics_have_tooltips(monkeypatch):
+    import json
+    import agent_monitor.ui.app as ui
+
+    monkeypatch.setattr(ui,"_snapshot",lambda force=False:_snapshot())
+    app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
+    assert all(metric.proto.help for metric in app.metric)
+    next(radio for radio in app.radio if radio.label=="메뉴").set_value("작업 이력").run(timeout=20)
+    assert not app.exception
+    for table in app.dataframe:
+        config=json.loads(table.proto.columns)
+        for name in table.proto.column_order:
+            assert config[name]["help"], name
+    next(radio for radio in app.radio if radio.label=="메뉴").set_value("기간 분석").run(timeout=20)
+    assert not app.exception
+    table=next(item for item in app.dataframe if "P90 작업 시간 (시:분:초)" in item.value)
+    assert all(json.loads(table.proto.columns)[name]["help"] for name in table.value.columns)

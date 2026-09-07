@@ -40,7 +40,7 @@ def scan_sources(paths: dict[str, Iterable[str]]) -> list[SourceFile]:
                         stat = path.stat()
                     except OSError:
                         continue
-                    label = root.name or agent
+                    label = root.parent.name if agent == 'antigravity' and root.name == 'brain' else root.name or agent
                     found[str(path.resolve())] = SourceFile(agent, path.resolve(), stat.st_size, stat.st_mtime_ns, label, agent)
             except OSError:
                 # pathlib can raise while traversing an unreadable child.

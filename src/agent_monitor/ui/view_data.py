@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from dataclasses import fields, is_dataclass
 import pandas as pd
 
-from .adapter import clipped_duration_seconds, filtered_requests, filtered_sessions, filtered_usage, frame, prior_period, record, weighted_cache_ratio
+from .adapter import clipped_duration_seconds, filtered_requests, filtered_sessions, filtered_usage, frame, record, weighted_cache_ratio
 from agent_monitor.analysis import split_duration_by_day
 
 
@@ -167,13 +167,6 @@ def build_view_data(snapshot: dict, state: dict) -> dict:
     if not daily.empty and "occurred_at" in daily:
         daily["date"] = daily.occurred_at.dt.tz_convert(tz).dt.date
         daily = daily.groupby("date")[[name for name in ("input_tokens","output_tokens","cache_read_tokens","cache_creation_tokens","total_tokens") if name in daily]].sum(min_count=1).reset_index()
-    if start and end:
-        previous_start, previous_end = prior_period(start, end)
-        previous_sessions = filtered_sessions(snapshot.get("sessions", []), previous_start, previous_end, agents, projects)
-        previous = filtered_usage(snapshot.get("usage", []), previous_start, previous_end, agents, projects, models, previous_sessions)
-    else: previous = pd.DataFrame()
-    comparison = pd.DataFrame({"current_total":[totals["total_tokens"]], "previous_total":[previous.total_tokens.sum(min_count=1) if "total_tokens" in previous else None]})
-    graph_frame = pd.DataFrame([{"agent": key[0], "session_id":key[1], **value} for key,value in rollups.items()])
     daily_request_duration=pd.DataFrame(columns=["date","duration_seconds"])
     if not requests.empty and "clipped_duration_seconds" in requests:
         rows=[]; zone=tz
@@ -186,4 +179,4 @@ def build_view_data(snapshot: dict, state: dict) -> dict:
         if rows: daily_request_duration=pd.DataFrame(rows).groupby("date").duration_seconds.sum().reset_index()
     request_duration=requests.get("clipped_duration_seconds",pd.Series(dtype=float)).sum(min_count=1)
     summary={**totals, "cache_read_ratio": weighted_cache_ratio(usage), "request_duration_seconds": None if pd.isna(request_duration) else float(request_duration), "union_duration_seconds": _union_seconds(duration_rows, start, end) if start and end else None}
-    return {"sessions_df": sessions, "requests_df": requests, "usage_df": usage, "events_df": events, "summary": summary, "daily": daily, "daily_request_duration":daily_request_duration, "comparison": comparison, "graph_view": {"context": graph, "own": own, "rollups": rollups}, "export_frames": {"sessions": sessions, "requests": requests, "usage": usage, "events": events, "graph": graph_frame}}
+    return {"sessions_df": sessions, "requests_df": requests, "usage_df": usage, "events_df": events, "summary": summary, "daily": daily, "daily_request_duration":daily_request_duration, "graph_view": {"context": graph, "own": own, "rollups": rollups}, "export_frames": {"sessions": sessions, "requests": requests, "usage": usage, "events": events}}

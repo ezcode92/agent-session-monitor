@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from .discovery import SourceFile
 from .models import Diagnostic, LogEvent, ParseResult, Session, Turn, Usage
 
-PARSER_VERSION = '2'
+PARSER_VERSION = '3'
 
 
 def _provenance(source: SourceFile, session: Session, usages: list[Usage] | None = None) -> None:
@@ -88,14 +88,32 @@ def _event_records(source: SourceFile, sid: str, records: list[tuple[int, dict]]
     label, kind, path = source.source_label or source.agent, source.source_kind or source.agent, str(source.path)
     events = []
     for line, record in records:
-        at = _time(_first(record, 'timestamp', 'time') or _first(record.get('payload', {}), 'timestamp'))
+        at = _time(_first(record, 'timestamp', 'time', 'created_at') or _first(record.get('payload', {}), 'timestamp'))
         body = record.get('payload') if isinstance(record.get('payload'), dict) else record
         message = body.get('message', record.get('message', {}))
         item = body.get('item') if isinstance(body.get('item'), dict) else {}
         role = body.get('role') or item.get('role') or (message.get('role') if isinstance(message, dict) else None) or body.get('type') or item.get('type') or 'record'
         content = _text(_first(body, 'content', 'text') or _first(item, 'content', 'text') or (message.get('content') if isinstance(message, dict) else None))
+        if source.agent == 'antigravity' and 'created_at' in record:
+            role = {'USER_INPUT': 'user', 'PLANNER_RESPONSE': 'assistant', 'ERROR_MESSAGE': 'error',
+                    'SYSTEM_MESSAGE': 'system', 'CONVERSATION_HISTORY': 'system',
+                    'DIRECTORY_RULES': 'system', 'CHECKPOINT': 'system', 'EPHEMERAL_MESSAGE': 'system'}.get(record.get('type'), role)
+            if record.get('type') in {'VIEW_FILE', 'GREP_SEARCH', 'LIST_DIRECTORY', 'RUN_COMMAND', 'CODE_ACTION',
+                                      'SEARCH_WEB', 'ASK_QUESTION', 'INVOKE_SUBAGENT', 'MCP_TOOL'}:
+                role = 'tool'
+            if not content and isinstance(record.get('tool_calls'), list):
+                names = [call['name'] for call in record['tool_calls'] if isinstance(call, dict) and isinstance(call.get('name'), str)]
+                content = ', '.join(names) or None
+            content = content or _text(record.get('error'))
         display = f'{role}: {content[:240]}' if content else str(role)
+        if source.agent == 'antigravity' and 'created_at' in record:
+            detail = [str(record[key]) for key in ('type', 'status') if record.get(key)]
+            if 'exit_code' in record: detail.append(f'exit_code={record["exit_code"]}')
+            if 'error_code' in record: detail.append(f'error_code={record["error_code"]}')
+            display += f' [{", ".join(detail)}]' if detail else ''
         stable = _first(body, 'id', 'uuid', 'response_id', 'record_id') or _first(record, 'uuid', 'id', 'requestId')
+        if stable is None and source.agent == 'antigravity' and _integer(record.get('step_index')) is not None:
+            stable = f'step:{record["step_index"]}'
         if stable is None:
             canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
             stable = hashlib.sha256(canonical.encode()).hexdigest()
@@ -228,25 +246,37 @@ def parse_claude(source: SourceFile) -> ParseResult:
 
 def parse_antigravity(source: SourceFile) -> ParseResult:
     out = ParseResult(); records = _records(source, out.diagnostics)
-    recognized = any(_first(r, 'timestamp', 'time') and (_first(r, 'role', 'type') or isinstance(r.get('message'), dict)) for _, r in records)
+    recognized = any(_time(_first(r, 'timestamp', 'time', 'created_at')) is not None and
+                     (_first(r, 'role', 'type') or isinstance(r.get('message'), dict)) for _, r in records)
     if not recognized:
         out.diagnostics.append(Diagnostic(str(source.path), 'unsupported_format', 'Antigravity transcript schema is unverified'))
         return out
-    # Current AGY stores transcripts under brain/<conversation-id>/.system_generated/logs.
-    # ``parent.name`` is consequently always "logs", not a session identifier.
-    parts = source.path.parts
-    try:
-        sid = parts[parts.index('brain') + 1]
-    except (ValueError, IndexError):
-        sid = source.path.parent.name
+    # A brain conversation owns its logs; the immediate parent is just "logs".
+    sid = next((parent.name for parent in source.path.parents if parent.parent.name == 'brain'), source.path.parent.name)
     session = Session(sid, 'antigravity', None, str(source.path), None, None, None, None)
+    out.diagnostics.append(Diagnostic(str(source.path), 'usage_unavailable', '이 transcript에서 토큰 사용량을 확인할 수 없습니다.'))
     turns: list[Turn] = []
     for line, rec in records:
-        at = _time(_first(rec, 'timestamp', 'time')); session.started_at = min(session.started_at, at) if at and session.started_at else at or session.started_at; session.last_activity_at = max(session.last_activity_at, at) if at and session.last_activity_at else at or session.last_activity_at
-        role = _first(rec, 'role') or (rec.get('message') or {}).get('role')
-        if role == 'user':
-            content = _first(rec, 'content', 'text') or (rec.get('message') or {}).get('content'); turns.append(Turn(str(_first(rec, 'id') or line), sid, content[:80] if isinstance(content, str) else None, at, None, data_quality=['token usage unsupported']))
-    _set_status(session, turns); _provenance(source, session); out.events = _event_records(source, sid, records); out.sessions.append(session); out.turns.extend(turns); return out
+        at = _time(_first(rec, 'timestamp', 'time', 'created_at'))
+        if at:
+            session.started_at = min(session.started_at, at) if session.started_at else at
+            session.last_activity_at = max(session.last_activity_at, at) if session.last_activity_at else at
+        message = rec.get('message') if isinstance(rec.get('message'), dict) else {}
+        role = _first(rec, 'role') or message.get('role')
+        if role == 'user' or rec.get('type') == 'USER_INPUT':
+            content = _text(_first(rec, 'content', 'text') or message.get('content'))
+            identifier = _first(rec, 'id', 'step_index')
+            turns.append(Turn(str(identifier if identifier is not None else line), sid, content[:80] if content else None,
+                              at, None))
+        if turns and at and turns[-1].started_at and at >= turns[-1].started_at:
+            turn = turns[-1]
+            turn.ended_at = max(turn.ended_at, at) if turn.ended_at else at
+            turn.duration_kind = 'observed'
+    session.title = next((turn.user_preview for turn in turns if turn.user_preview), None)
+    # DONE describes a single step, not completion of the conversation.
+    _set_status(session, turns); _provenance(source, session)
+    out.events = _event_records(source, sid, records); out.sessions.append(session); out.turns.extend(turns)
+    return out
 
 
 def _set_status(session: Session, turns: list[Turn]) -> None:
@@ -274,7 +304,6 @@ def _event_id(usage: Usage, agent: str, session_id: str) -> str:
 
 def _merge_session(existing: Session, incoming: Session) -> None:
     existing.sources = list(dict.fromkeys([*(existing.sources or [existing.source_path]), *(incoming.sources or [incoming.source_path])]))
-    existing.data_quality = list(dict.fromkeys([*existing.data_quality, *incoming.data_quality]))
     if incoming.started_at and (not existing.started_at or incoming.started_at < existing.started_at): existing.started_at = incoming.started_at
     if incoming.last_activity_at and (not existing.last_activity_at or incoming.last_activity_at > existing.last_activity_at): existing.last_activity_at = incoming.last_activity_at
     existing.title = existing.title or incoming.title
@@ -286,7 +315,6 @@ def _merge_turn(existing: Turn, incoming: Turn) -> None:
     if incoming.started_at and (not existing.started_at or incoming.started_at < existing.started_at): existing.started_at = incoming.started_at
     if incoming.ended_at and (not existing.ended_at or incoming.ended_at > existing.ended_at): existing.ended_at = incoming.ended_at
     existing.usage.extend(incoming.usage)
-    existing.data_quality = list(dict.fromkeys([*existing.data_quality, *incoming.data_quality]))
 
 
 def _merge_event(existing: LogEvent, incoming: LogEvent) -> None:
@@ -315,7 +343,7 @@ def parse_sources(sources: Iterable[SourceFile]) -> ParseResult:
             key = _event_id(usage, turn.agent or '', turn.session_id); usage.event_id = key
             if key not in seen_usage: seen_usage.add(key); unique.append(usage)
         turn.usage[:] = unique
-    combined.turns[:] = [turn for turn in combined.turns if turn.usage or turn.user_preview]
+    combined.turns[:] = [turn for turn in combined.turns if turn.usage or turn.user_preview or turn.agent == 'antigravity']
     # Relationship summaries are separate from turn totals: analysis continues
     # to consume turns once, avoiding parent/child double counting.
     by_id = {(session.agent, session.session_id): session for session in combined.sessions}

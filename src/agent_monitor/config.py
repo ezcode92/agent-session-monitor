@@ -18,7 +18,7 @@ def default_config() -> dict[str, Any]:
         'paths': {
             'codex': [str(codex / 'sessions'), str(codex / 'archived_sessions')],
             'claude': [str(claude / 'projects')],
-            'antigravity': [str(gemini / x) for x in ('antigravity', 'antigravity-cli', 'antigravity-ide')],
+            'antigravity': [str(gemini / x / 'brain') for x in ('antigravity', 'antigravity-cli', 'antigravity-ide')],
         },
     }
 

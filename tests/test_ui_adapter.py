@@ -3,7 +3,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 from agent_monitor.models import Session, Usage
 from agent_monitor.ui.app import _agent_status, _history_events, _scalar_table
-from agent_monitor.ui.adapter import append_bounded, append_unique, clipped_duration_seconds, comparison_summary, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, prior_period, recent_records, source_label, subtree_keys, usage_label, usage_total, weighted_cache_ratio
+from agent_monitor.ui.adapter import append_bounded, append_unique, clipped_duration_seconds, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, recent_records, source_label, subtree_keys, usage_label, usage_total, weighted_cache_ratio
 from agent_monitor.ui.view_data import build_view_data
 
 def test_missing_usage_is_never_shown_as_zero(): assert usage_total({}) is None and usage_label(None)=="—"
@@ -219,9 +219,6 @@ def test_event_filter_and_cursor_respect_time_agent_model_and_generation():
     start=datetime(2026,9,7,tzinfo=timezone.utc); end=datetime(2026,9,8,tzinfo=timezone.utc); assert filter_events(events,start,end,["a"],["m"]).event_id.tolist()==["1"]
     fresh,cursor=monitor_cursor(events,"1"); assert [x["event_id"] for x in fresh]==["2"] and cursor=="2"
 def test_lazy_preview_never_requires_raw_and_caps_display(): assert lazy_preview({"display":"x"*5},3)=="xxx…"
-def test_equal_previous_period_and_rules_based_summary():
-    start,end=period_bounds("오늘",now=datetime(2026,9,7,12,tzinfo=timezone.utc)); assert prior_period(start,end)==(datetime(2026,9,6,tzinfo=timezone.utc),start)
-    table,text=comparison_summary(pd.DataFrame({"total_tokens":[20]}),pd.DataFrame({"total_tokens":[5]})); assert table.iloc[-1]["값"]==15 and "증가" in text
 
 def test_usage_filters_apply_time_and_model_without_hiding_empty_usage_sessions():
     start=datetime(2026,9,7,tzinfo=timezone.utc); end=start+timedelta(days=1)
@@ -237,3 +234,9 @@ def test_clipped_duration_weighted_ratio_and_arbitrary_subtree():
     assert weighted_cache_ratio([{"input_tokens":100,"cache_read_tokens":50},{"input_tokens":10,"cache_read_tokens":0}]) == 50/110
     graph={"children":{("a","r"):[("a","c")],("a","c"):[("a","g")]}}
     assert subtree_keys(graph,("a","r"))==[("a","r"),("a","c"),("a","g")]
+
+
+def test_duration_labels_preserve_unknown_and_do_not_wrap_at_one_day():
+    from agent_monitor.ui.adapter import duration_label
+    assert [duration_label(value) for value in (0, 59, 60, 3599.6, 3661, 90061)] == ["00:00:00", "00:00:59", "00:01:00", "01:00:00", "01:01:01", "25:01:01"]
+    assert all(duration_label(value) == "—" for value in (None, pd.NA, float("nan"), float("inf"), -1))

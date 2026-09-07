@@ -46,7 +46,6 @@ class Session:
     status_reason: str = ""
     own_usage: list[Usage] = field(default_factory=list)
     child_usage: list[Usage] = field(default_factory=list)
-    data_quality: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     source_label: Optional[str] = None
     source_kind: Optional[str] = None
@@ -63,7 +62,6 @@ class Turn:
     status_reason: str = ""
     duration_kind: str = "unknown"
     usage: list[Usage] = field(default_factory=list)
-    data_quality: list[str] = field(default_factory=list)
     agent: Optional[str] = None
 
 

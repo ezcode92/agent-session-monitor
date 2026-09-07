@@ -1,6 +1,7 @@
 """Mapping helpers used by the Streamlit presentation layer."""
 from __future__ import annotations
 from dataclasses import fields, is_dataclass
+from math import isfinite
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import PurePath
@@ -37,7 +38,7 @@ def source_kind(value: Any) -> str:
 
 def frame(values: Any) -> pd.DataFrame:
     data = pd.DataFrame(records(values))
-    for old, new in {"last_activity_at":"last_activity", "user_preview":"title", "data_quality":"data_status", "display":"message"}.items():
+    for old, new in {"last_activity_at":"last_activity", "user_preview":"title", "display":"message"}.items():
         if old in data and new not in data: data[new] = data[old]
     if not data.empty and ("source_label" not in data or "source_kind" not in data):
         rows = data.to_dict("records")
@@ -57,6 +58,14 @@ def usage_total(item: dict[str, Any]) -> int | None:
     return int(input_tokens) + int(output_tokens)
 
 def usage_label(value: int | float | None) -> str: return "—" if value is None or pd.isna(value) else f"{int(value):,}"
+
+def duration_label(value: int | float | None) -> str:
+    """Display elapsed seconds as hours:minutes:seconds, without a 24-hour wrap."""
+    if value is None or pd.isna(value) or not isfinite(value) or value < 0:
+        return "—"
+    hours, remainder = divmod(int(float(value) + 0.5), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 def period_bounds(choice: str, start=None, end=None, now: datetime | None=None, tz_name: str = "UTC"):
     zone = ZoneInfo(tz_name)
@@ -229,16 +238,19 @@ def lazy_preview(event: dict[str, Any], maximum: int = 2000) -> str:
     text = str(get(record(event), "display", "message", default=""))
     return text if len(text) <= maximum else text[:maximum] + "…"
 
-def prior_period(start: datetime, end: datetime) -> tuple[datetime, datetime]:
-    """The immediately preceding interval, preserving the selected duration."""
-    return start - (end - start), start
-
-def comparison_summary(current: pd.DataFrame, previous: pd.DataFrame) -> tuple[pd.DataFrame, str]:
-    current_total = current.get("total_tokens", pd.Series(dtype=float)).sum(min_count=1)
-    previous_total = previous.get("total_tokens", pd.Series(dtype=float)).sum(min_count=1)
-    current_value = None if pd.isna(current_total) else int(current_total)
-    previous_value = None if pd.isna(previous_total) else int(previous_total)
-    delta = None if current_value is None or previous_value is None else current_value - previous_value
-    direction = "비교할 사용량이 부족합니다" if delta is None else ("증가" if delta > 0 else "감소" if delta < 0 else "동일")
-    table = pd.DataFrame({"항목":["선택 기간 토큰","직전 동일 기간 토큰","증감"], "값":[current_value, previous_value, delta]})
-    return table, f"토큰 사용량은 {direction}" + (f" ({delta:+,})" if delta is not None else "") + "."
+def request_timeline(requests, keys, start, end) -> pd.DataFrame:
+    """Keep each known request interval separate, clipped to the selected period."""
+    data = frame(requests)
+    empty_times = pd.Series(index=data.index, dtype="datetime64[ns, UTC]")
+    data["clip_start"] = data.get("started_at", empty_times)
+    data["clip_end"] = data.get("ended_at", empty_times)
+    if start is not None:
+        data["clip_start"] = data.clip_start.clip(lower=pd.to_datetime(start, utc=True))
+    if end is not None:
+        data["clip_end"] = data.clip_end.clip(upper=pd.to_datetime(end, utc=True))
+    data["clipped_duration_seconds"] = (data.clip_end - data.clip_start).dt.total_seconds()
+    if not {"agent", "session_id"} <= set(data):
+        return data.iloc[:0].copy()
+    selected = set(map(tuple, keys))
+    included = pd.Series([(agent, sid) in selected for agent, sid in zip(data.agent, data.session_id)], index=data.index)
+    return data[included & (data.clipped_duration_seconds > 0)].copy()
