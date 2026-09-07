@@ -1,0 +1,14 @@
+.venv/
+.tools/
+.uv-cache/
+.uv-python/
+__pycache__/
+.pytest_cache/
+.streamlit/secrets.toml
+.agent-monitor/
+.idea/
+.agent-monitor-benchmark-report.md
+agent-monitor-benchmark-*/
+*.jsonl
+sessions/
+archived_sessions/
