@@ -1,9 +1,64 @@
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 from streamlit.testing.v1 import AppTest
+from agent_monitor.models import Session, Usage
+from agent_monitor.ui.app import _agent_status, _history_events, _scalar_table
 from agent_monitor.ui.adapter import append_bounded, append_unique, clipped_duration_seconds, comparison_summary, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, prior_period, recent_records, source_label, subtree_keys, usage_label, usage_total, weighted_cache_ratio
+from agent_monitor.ui.view_data import build_view_data
 
 def test_missing_usage_is_never_shown_as_zero(): assert usage_total({}) is None and usage_label(None)=="—"
+def test_record_is_shallow_for_nested_dataclass_fields():
+    session=Session('s','codex',None,'p',None,None,None,None,own_usage=[Usage(total_tokens=1)])
+    assert frame([session]).iloc[0].own_usage[0].total_tokens == 1
+def test_scalar_table_hides_nested_usage_columns():
+    assert "own_usage" not in _scalar_table([{"session_id":"s","own_usage":[1],"child_usage":[2]}]).columns
+
+def test_agent_status_keeps_configured_empty_antigravity_root():
+    rows=dict((agent,(roots,files,sessions)) for agent,roots,files,sessions in _agent_status(
+        {"paths":{"antigravity":["C:/a/.gemini/antigravity"]}}, pd.DataFrame([{"agent":"codex","session_id":"s","source_path":"C:/codex/s"}]), {"antigravity"}))
+    assert rows["antigravity"] == (1,0,0) and rows["codex"] == (0,1,1)
+
+def test_scalar_session_table_has_usage_counts_without_nested_lists():
+    result=_scalar_table([{"session_id":"s","own_usage":[1,2],"child_usage":[3]}])
+    assert result.loc[0,"own_usage_count"] == 2 and result.loc[0,"child_usage_count"] == 1
+
+def test_sidebar_shows_configured_antigravity_and_diagnostics():
+    source='''import streamlit as st
+import agent_monitor.ui.app as ui
+from datetime import datetime, timezone
+at=datetime(2026,9,7,tzinfo=timezone.utc)
+s={"timezone":"UTC","config":{"timezone":"UTC","paths":{"antigravity":["C:/a/.gemini/antigravity"]}},"sessions":[{"agent":"codex","session_id":"s","started_at":at,"last_activity":at}],"requests":[],"usage":[],"events":[],"diagnostics":["unreadable"],"config_diagnostics":[],"paths":{"antigravity":["C:/a/.gemini/antigravity"]},"scanned_at":at,"generation":1,"orchestration":{}}
+ui._snapshot=lambda force=False:s
+ui.run()'''
+    app=AppTest.from_string(source).run()
+    assert "agy (Antigravity)" in app.multiselect[0].options
+    assert any("진단 1건" in item.value for item in app.warning)
+
+def test_manual_refresh_uses_cached_source_refresh_and_rerenders_snapshot():
+    source='''import agent_monitor.service as service
+import agent_monitor.ui.app as ui
+from datetime import datetime, timezone
+at=datetime(2026,9,7,tzinfo=timezone.utc)
+def snap(total, generation):
+ return {"timezone":"UTC","config":{"paths":{}},"sessions":[{"agent":"codex","session_id":"s","started_at":at,"last_activity":at}],"requests":[],"usage":[{"agent":"codex","session_id":"s","event_id":str(generation),"total_tokens":total,"occurred_at":at}],"events":[],"diagnostics":[],"config_diagnostics":[],"paths":{},"scanned_at":at,"generation":generation,"orchestration":{}}
+ui._snapshot=lambda force=False:snap(1,1)
+service.refresh_sources=lambda:snap(2,2)
+ui.run()'''
+    app=AppTest.from_string(source).run()
+    next(button for button in app.button if button.label == "지금 새로고침").click().run(timeout=10)
+    assert next(metric.value for metric in app.metric if metric.label == "전체 토큰") == "2"
+
+def test_orchestration_does_not_poll_live_log_until_enabled():
+    source='''import pandas as pd
+import agent_monitor.ui.app as ui
+from datetime import datetime, timezone
+at=datetime(2026,9,7,tzinfo=timezone.utc)
+ui._live_monitor=lambda agent,sid: (_ for _ in ()).throw(AssertionError("unexpected poll"))
+snapshot={"sessions":[{"agent":"a","session_id":"r","started_at":at,"last_activity":at}],"orchestration":{"roots":[("a","r")],"children":{("a","r"):[]},"depths":{("a","r"):0},"edges":[]}}
+view={"graph_view":{"context":snapshot["orchestration"],"rollups":{("a","r"):{"total_tokens":1}}}}
+ui.orchestration(snapshot,pd.DataFrame(snapshot["sessions"]),{},view)'''
+    app=AppTest.from_string(source).run()
+    assert not app.exception
 def test_total_fallback_does_not_double_count_cache_read(): assert usage_total({"input_tokens":10,"cache_read_tokens":8,"output_tokens":2})==12
 def test_usage_total_requires_both_fallback_parts(): assert usage_total({"input_tokens":10}) is None
 
@@ -13,6 +68,41 @@ def test_session_and_request_intervals_overlap_period():
     requests=[{"session_id":"agy","started_at":"2026-09-06T23:00:00Z","ended_at":"2026-09-07T01:00:00Z"}]
     assert filtered_sessions(sessions,start,end).session_id.tolist()==["agy"]
     assert filtered_requests(requests,start,end,sessions=sessions).session_id.tolist()==["agy"]
+
+def test_qualified_session_membership_is_vectorized_and_keeps_legacy_agentless_rows():
+    selected=[{"agent":"a","session_id":"same"}]
+    requests=[{"agent":"a","session_id":"same"},{"agent":"b","session_id":"same"}]
+    usage=[{"agent":"a","session_id":"same"},{"agent":"b","session_id":"same"}]
+    assert filtered_requests(requests, sessions=selected).agent.tolist()==["a"]
+    assert filtered_usage(usage, sessions=selected).agent.tolist()==["a"]
+    assert filtered_requests([{"session_id":"same"}], sessions=selected).session_id.tolist()==["same"]
+    assert filtered_usage(usage, sessions=[]).empty
+
+def test_history_log_filter_is_narrow_and_base_view_has_no_events():
+    start=datetime(2026,9,7,tzinfo=timezone.utc); end=start+timedelta(days=1)
+    snapshot={"events":[{"agent":"a","session_id":"same","event_id":"keep","occurred_at":start},{"agent":"b","session_id":"same","event_id":"drop","occurred_at":start}]}
+    state={"start":start,"end":end,"models":[]}
+    assert _history_events(snapshot,"a","same",state).event_id.tolist()==["keep"]
+    base=build_view_data({"sessions":[{"agent":"a","session_id":"same","started_at":start,"last_activity":end}],"usage":[],"requests":[],"events":snapshot["events"],"orchestration":{}},{**state,"agents":[],"projects":[],"include_events":False})
+    assert base["events_df"].empty
+
+def test_history_panes_are_native_and_log_is_selected_session_only():
+    source='''import pandas as pd
+import streamlit as st
+import agent_monitor.ui.app as ui
+from datetime import datetime, timezone, timedelta
+at=datetime(2026,9,7,tzinfo=timezone.utc)
+snapshot={"events":[{"agent":"a","session_id":"same","event_id":"keep","display":"keep","occurred_at":at},{"agent":"b","session_id":"same","event_id":"drop","display":"drop","occurred_at":at}]}
+sessions=pd.DataFrame([{"agent":"a","session_id":"same","started_at":at,"last_activity":at,"title":"one"}])
+view={"requests_df":pd.DataFrame([{"agent":"a","session_id":"same","turn_id":"t","total_tokens":3}])}
+state={"start":at-timedelta(hours=1),"end":at+timedelta(hours=1),"models":[]}
+ui._live_monitor=lambda agent,sid: st.caption(f"live:{agent}:{sid}")
+ui.history(snapshot,sessions,state,view)'''
+    app=AppTest.from_string(source).run()
+    assert app.radio[0].options == ["요청","로그","실시간"]
+    for pane in app.radio[0].options:
+        app.radio[0].set_value(pane).run(timeout=10)
+        assert not app.exception
 def test_filtered_sessions_applies_local_period_and_agent():
     start,end=period_bounds("오늘",now=datetime(2026,9,7,12,tzinfo=timezone.utc)); result=filtered_sessions([{"session_id":"in","agent":"codex","last_activity":"2026-09-07T03:00:00Z"},{"session_id":"out","agent":"claude","last_activity":"2026-09-06T03:00:00Z"}],start,end,agents=["codex"]); assert result.session_id.tolist()==["in"]
 def test_period_bounds_uses_iana_local_midnight():

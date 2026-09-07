@@ -1,6 +1,6 @@
 """Mapping helpers used by the Streamlit presentation layer."""
 from __future__ import annotations
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import PurePath
@@ -12,7 +12,7 @@ USAGE_COLUMNS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_cr
 
 def record(value: Any) -> dict[str, Any]:
     if value is None: return {}
-    if is_dataclass(value): return asdict(value)
+    if is_dataclass(value): return {field.name:getattr(value,field.name) for field in fields(value)}
     if isinstance(value, dict): return dict(value)
     return {name: getattr(value, name) for name in dir(value) if not name.startswith("_") and not callable(getattr(value, name))}
 
@@ -39,7 +39,7 @@ def frame(values: Any) -> pd.DataFrame:
     data = pd.DataFrame(records(values))
     for old, new in {"last_activity_at":"last_activity", "user_preview":"title", "data_quality":"data_status", "display":"message"}.items():
         if old in data and new not in data: data[new] = data[old]
-    if not data.empty:
+    if not data.empty and ("source_label" not in data or "source_kind" not in data):
         rows = data.to_dict("records")
         if "source_label" not in data: data["source_label"] = [source_label(row) for row in rows]
         if "source_kind" not in data: data["source_kind"] = [source_kind(row) for row in rows]
@@ -81,16 +81,30 @@ def filtered_sessions(sessions, start, end, agents=(), projects=(), models=()):
         data = data[data.started_at.notna() & data.last_activity.notna() & (data.last_activity >= start) & (data.started_at < end)]
     return data.copy()
 
+
+def _selected_session_mask(data: pd.DataFrame, selected: pd.DataFrame) -> pd.Series:
+    """Match canonical agent/session pairs without row-wise Python calls.
+
+    Older records without an agent keep the legacy session-ID membership path.
+    Empty selected data remains an empty selection rather than becoming "all".
+    """
+    if selected.empty:
+        return pd.Series(False, index=data.index)
+    paired = {"agent", "session_id"} <= set(data) and {"agent", "session_id"} <= set(selected)
+    if paired and data["agent"].notna().any() and selected["agent"].notna().any():
+        allowed_rows = selected.dropna(subset=["agent", "session_id"])
+        allowed = pd.MultiIndex.from_frame(allowed_rows[["agent", "session_id"]].astype(str))
+        values = pd.MultiIndex.from_arrays([data["agent"].astype("string").fillna(""), data["session_id"].astype(str)])
+        return pd.Series(values.isin(allowed), index=data.index)
+    allowed = set(selected.get("session_id", pd.Series(dtype=str)).dropna().astype(str))
+    return data["session_id"].astype(str).isin(allowed)
+
 def filtered_requests(requests, start=None, end=None, agents=(), sessions=None):
     data = frame(requests)
     if data.empty: return data
     if sessions is not None and "session_id" in data:
         selected = frame(sessions)
-        if {"agent", "session_id"} <= set(data) and {"agent", "session_id"} <= set(selected):
-            allowed = {(str(row.agent), str(row.session_id)) for row in selected.itertuples()}
-            data = data[data.apply(lambda row: (str(row.agent), str(row.session_id)) in allowed, axis=1)]
-        else:
-            allowed = set(selected.get("session_id", pd.Series(dtype=str)).dropna().astype(str)); data = data[data.session_id.astype(str).isin(allowed)]
+        data = data[_selected_session_mask(data, selected)]
     if start is not None and "ended_at" in data: data = data[data.ended_at.notna() & (data.ended_at >= start)]
     if end is not None and "started_at" in data: data = data[data.started_at.notna() & (data.started_at < end)]
     if agents and "agent" in data: data = data[data.agent.isin(agents)]
@@ -103,11 +117,7 @@ def filtered_usage(usage, start=None, end=None, agents=(), projects=(), models=(
         return data
     if sessions is not None and "session_id" in data:
         selected = frame(sessions)
-        if {"agent", "session_id"} <= set(data) and {"agent", "session_id"} <= set(selected):
-            allowed = {(str(row.agent), str(row.session_id)) for row in selected.itertuples()}
-            data = data[data.apply(lambda row: (str(row.agent), str(row.session_id)) in allowed, axis=1)]
-        else:
-            allowed = set(selected.get("session_id", pd.Series(dtype=str)).dropna().astype(str)); data = data[data.session_id.astype(str).isin(allowed)]
+        data = data[_selected_session_mask(data, selected)]
     if start is not None and "occurred_at" in data:
         data = data[data.occurred_at.notna() & (data.occurred_at >= start)]
     if end is not None and "occurred_at" in data:

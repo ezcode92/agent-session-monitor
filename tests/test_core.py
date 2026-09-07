@@ -11,6 +11,18 @@ from agent_monitor.parsers import _event_id
 from agent_monitor.config import load_config, path_diagnostics
 
 
+def test_refresh_sources_reuses_unchanged_parse_cache(tmp_path, monkeypatch):
+    path=tmp_path / "s.jsonl"
+    path.write_text('{"type":"session_meta","payload":{"id":"s"}}', encoding="utf-8")
+    monitor=AgentMonitor({"paths":{"codex":[str(tmp_path)],"claude":[],"antigravity":[]}})
+    import agent_monitor.service as service
+    original=service.parse_source; calls=[]
+    monkeypatch.setattr(service,"parse_source",lambda source: calls.append(source.path) or original(source))
+    first=monitor.get_snapshot()
+    second=monitor.refresh_sources()
+    assert len(calls) == 1 and first is second
+
+
 def source(tmp_path: Path, agent: str, text: str) -> SourceFile:
     path = tmp_path / f'{agent}.jsonl'; path.write_text(text, encoding='utf-8'); stat = path.stat()
     return SourceFile(agent, path, stat.st_size, stat.st_mtime_ns)

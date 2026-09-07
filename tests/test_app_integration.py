@@ -58,10 +58,12 @@ def test_actual_entrypoint_renders_all_pages_with_scalar_request_values(monkeypa
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
     assert not app.exception
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "63"
-    for page in app.radio[0].options:
-        app.radio[0].set_value(page).run(timeout=20)
+    menu = next(radio for radio in app.radio if radio.label == "메뉴")
+    for page in menu.options:
+        menu.set_value(page).run(timeout=20)
         assert not app.exception
-    app.radio[0].set_value("작업 이력").run(timeout=20)
+    menu = next(radio for radio in app.radio if radio.label == "메뉴")
+    menu.set_value("작업 이력").run(timeout=20)
     request_frames = [element.value for element in app.dataframe if "total_tokens" in element.value.columns]
     assert request_frames and request_frames[-1].iloc[0]["total_tokens"] == 11
 
@@ -121,7 +123,8 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     monkeypatch.setattr(service, "poll_session", lambda session_id: current["value"])
     monkeypatch.setattr(service, "raw_event", raw_event)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
-    app.radio[0].set_value("작업 이력").run(timeout=20)
+    next(radio for radio in app.radio if radio.label == "메뉴").set_value("작업 이력").run(timeout=20)
+    next(radio for radio in app.radio if radio.label == "세션 보기").set_value("실시간").run(timeout=20)
     pause = next(toggle for toggle in app.toggle if toggle.label == "일시정지")
     pause.set_value(True).run(timeout=20)
     changed = deepcopy(initial)
@@ -144,9 +147,11 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     current["value"] = replacement
     app.run(timeout=20)
     assert any("새 이벤트 3건" in element.value for element in app.info)
+    next(radio for radio in app.radio if radio.label == "세션 보기").set_value("로그").run(timeout=20)
     next(button for button in app.button if button.label == "원시 JSON 불러오기").click().run(timeout=20)
     assert raw_calls == [("codex", "root", "synthetic.jsonl", "1")]
     assert any("selected" in element.value for element in app.json)
+    next(radio for radio in app.radio if radio.label == "세션 보기").set_value("실시간").run(timeout=20)
     pause = next(toggle for toggle in app.toggle if toggle.label == "일시정지")
     pause.set_value(False).run(timeout=20)
     event_frames = [element.value for element in app.dataframe if "event_id" in element.value.columns]
@@ -155,7 +160,7 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     refreshed["generation"] = 4
     refreshed["usage"][0]["total_tokens"] = 110
     current["value"] = refreshed
-    app.radio[0].set_value("개요").run(timeout=20)
-    refresh = next(toggle for toggle in app.toggle if toggle.label == "전체 화면 5초 새로고침")
+    next(radio for radio in app.radio if radio.label == "메뉴").set_value("개요").run(timeout=20)
+    refresh = next(toggle for toggle in app.toggle if toggle.label == "고급: 전체 화면 5초 자동 새로고침")
     refresh.set_value(True).run(timeout=20)
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "162"

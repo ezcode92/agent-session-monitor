@@ -1,10 +1,11 @@
 """Pure, deterministic view-model construction shared by dashboard pages."""
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import datetime, timezone
+from dataclasses import fields, is_dataclass
 import pandas as pd
 
-from .adapter import clipped_duration_seconds, filtered_requests, filtered_sessions, filtered_usage, frame, prior_period, weighted_cache_ratio
+from .adapter import clipped_duration_seconds, filtered_requests, filtered_sessions, filtered_usage, frame, prior_period, record, weighted_cache_ratio
 from agent_monitor.analysis import split_duration_by_day
 
 
@@ -22,10 +23,27 @@ def _union_seconds(rows, start, end):
     return sum((right-left).total_seconds() for left, right in merged)
 
 
+def _scalar_rows(values, omit=("own_usage", "child_usage", "usage")):
+    rows=[]
+    for value in values:
+        if is_dataclass(value): rows.append({field.name:getattr(value,field.name) for field in fields(value) if field.name not in omit})
+        elif isinstance(value,dict): rows.append({key:item for key,item in value.items() if key not in omit})
+        else: rows.append(value)
+    return rows
+
+
+def _event_timestamp(value):
+    """Return a UTC Timestamp, avoiding parser work for collector datetimes."""
+    if isinstance(value, (datetime, pd.Timestamp)):
+        stamp = pd.Timestamp(value)
+        return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+    return pd.to_datetime(value, errors="coerce", utc=True)
+
+
 def build_view_data(snapshot: dict, state: dict) -> dict:
     start, end = state.get("start"), state.get("end")
     agents, projects, models = state.get("agents", ()), state.get("projects", ()), state.get("models", ())
-    sessions = filtered_sessions(snapshot.get("sessions", []), start, end, agents, projects)
+    sessions = filtered_sessions(_scalar_rows(snapshot.get("sessions", [])), start, end, agents, projects)
     usage = filtered_usage(snapshot.get("usage", []), start, end, agents, projects, models, sessions)
     # Usage events from the collector are intentionally compact; enrich their
     # display/filter fields from the canonical composite session identity.
@@ -47,7 +65,29 @@ def build_view_data(snapshot: dict, state: dict) -> dict:
         usage = usage[usage.agent.notna()].copy()
         fields = [name for name in ("agent", "session_id", "project") if name in canonical]
         usage = usage.drop(columns=["project"], errors="ignore").merge(canonical[fields], on=["agent", "session_id"], how="left")
-    events = frame(snapshot.get("events", []))
+    # Only history renders/exports transcript events.  Other pages avoid a
+    # potentially large event DataFrame entirely.
+    if not state.get("include_events", True):
+        events = pd.DataFrame()
+    else:
+        # Avoid recursively materializing every transcript event on each dashboard
+    # rerun.  Filter lightweight dataclasses/mappings first.
+        selected_keys={(str(row.agent),str(row.session_id)) for row in sessions.itertuples() if hasattr(row,"agent")}
+        raw_events=[]
+        left_bound = pd.Timestamp(start).tz_localize("UTC") if start is not None and pd.Timestamp(start).tzinfo is None else (pd.Timestamp(start).tz_convert("UTC") if start is not None else None)
+        right_bound = pd.Timestamp(end).tz_localize("UTC") if end is not None and pd.Timestamp(end).tzinfo is None else (pd.Timestamp(end).tz_convert("UTC") if end is not None else None)
+        for event in snapshot.get("events", []):
+            # `record` is shallow: provenance/raw location fields remain
+            # available without expanding transcript payloads.
+            value = record(event)
+            at = _event_timestamp(value.get("occurred_at"))
+            if left_bound is not None and (pd.isna(at) or at < left_bound): continue
+            if right_bound is not None and (pd.isna(at) or at >= right_bound): continue
+            if agents and value.get("agent") not in agents: continue
+            if models and value.get("model") not in models: continue
+            if projects and (str(value.get("agent")),str(value.get("session_id"))) not in selected_keys: continue
+            raw_events.append(value)
+        events = frame(raw_events)
     if not events.empty:
         if start is not None: events = events[events.occurred_at.notna() & (events.occurred_at >= start)]
         if end is not None: events = events[events.occurred_at.notna() & (events.occurred_at < end)]
@@ -103,6 +143,7 @@ def build_view_data(snapshot: dict, state: dict) -> dict:
         if key in seen: return set()
         return {key} | set().union(*(descendants(child, seen | {key}) for child in children.get(key, [])))
     rollups = {}
+    request_records = requests.to_dict("records")
     for key in set(graph.get("depths", {})) | set(own):
         nodes = descendants(key); rows = [row for node in nodes for row in own.get(node, [])]
         unique_map = {f"{row.get('agent')}:{row.get('session_id')}:{row.get('event_id') or f'{row.get('turn_id')}:{row.get('record_key')}'}": row for row in rows}
@@ -114,7 +155,7 @@ def build_view_data(snapshot: dict, state: dict) -> dict:
         desc_rows = [row for event,row in unique_map.items() if (row.get("agent"), str(row.get("session_id"))) != key]
         own_known = [row.get("total_tokens") for row in own_rows if pd.notna(row.get("total_tokens"))]
         desc_known = [row.get("total_tokens") for row in desc_rows if pd.notna(row.get("total_tokens"))]
-        request_rows = [row for row in requests.to_dict("records") if (row.get("agent"), str(row.get("session_id"))) in nodes]
+        request_rows = [row for row in request_records if (row.get("agent"), str(row.get("session_id"))) in nodes]
         rollups[key] = {"own_total": sum(own_known) if own_known else None,
                         "descendant_total": sum(desc_known) if desc_known else None,
                         "total_tokens": sum(totals_known) if totals_known else None,

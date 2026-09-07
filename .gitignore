@@ -12,3 +12,4 @@ agent-monitor-benchmark-*/
 *.jsonl
 sessions/
 archived_sessions/
+.agent-monitor-profile.json

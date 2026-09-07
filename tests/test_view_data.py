@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from agent_monitor.ui.view_data import build_view_data
+from agent_monitor.ui.view_data import _event_timestamp, build_view_data
 from agent_monitor.service import AgentMonitor
 
 
@@ -52,3 +52,22 @@ def test_request_cache_ratio_uses_only_known_pairs():
     requests=[{"agent":"a","session_id":"s","turn_id":"t","started_at":start,"ended_at":start+timedelta(hours=1)}]
     view=build_view_data({"sessions":sessions,"usage":usage,"requests":requests,"events":[],"orchestration":{}},{"start":start,"end":end,"agents":[],"projects":[],"models":[]})
     assert view["requests_df"].iloc[0].cache_read_ratio == .5
+
+
+def test_events_are_lazy_outside_history_and_keep_provenance_for_iso_timestamps():
+    start=datetime(2026,1,1,tzinfo=timezone.utc); end=start+timedelta(days=1)
+    snapshot={"sessions":[{"agent":"a","session_id":"s","started_at":start,"last_activity":end}],"usage":[],"requests":[],
+              "events":[{"agent":"a","session_id":"s","occurred_at":"2026-01-01T01:00:00Z","event_id":"e","source_label":"antigravity-cli","source_kind":"jsonl","source_path":"C:/logs/a.jsonl","raw_record":{"large":"kept shallow"}}],"orchestration":{}}
+    state={"start":start,"end":end,"agents":[],"projects":[],"models":[]}
+    assert build_view_data(snapshot,{**state,"include_events":False})["events_df"].empty
+    events=build_view_data(snapshot,{**state,"include_events":True})["events_df"]
+    assert len(events)==1 and events.iloc[0].source_label == "antigravity-cli" and events.iloc[0].source_kind == "jsonl"
+
+
+def test_event_timestamp_datetime_fast_path_does_not_parse_string(monkeypatch):
+    import agent_monitor.ui.view_data as view_data
+    called=[]
+    original=view_data.pd.to_datetime
+    monkeypatch.setattr(view_data.pd, "to_datetime", lambda *args, **kwargs: called.append(args[0]) or original(*args, **kwargs))
+    assert _event_timestamp(datetime(2026,1,1,tzinfo=timezone.utc)).isoformat().startswith("2026-01-01")
+    assert called == []

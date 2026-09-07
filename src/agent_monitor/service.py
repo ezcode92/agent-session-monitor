@@ -96,6 +96,13 @@ class AgentMonitor:
         """Re-scan changed files; safe to call from a one-second UI poll."""
         return self.get_snapshot()
 
+    def refresh_sources(self) -> dict:
+        """Discover/stat sources and reuse every unchanged parsed result."""
+        # A user-initiated refresh should discover immediately, but still lets
+        # get_snapshot return cached ParseResults for unchanged file revisions.
+        self._next_discovery = 0
+        return self.get_snapshot(force=False)
+
     def poll_session(self, session_id: str) -> dict:
         """One-second selected-session poll: stat known files, no directory walk."""
         # Bootstrap once; steady-state polling must not enter the discovery or
@@ -165,6 +172,13 @@ def get_snapshot(force: bool = False) -> dict:
     global _default_monitor
     if _default_monitor is None: _default_monitor = AgentMonitor()
     return _default_monitor.get_snapshot(force)
+
+
+def refresh_sources() -> dict:
+    """Public manual-refresh path; unlike force=True it keeps parse cache hits."""
+    global _default_monitor
+    if _default_monitor is None: _default_monitor = AgentMonitor()
+    return _default_monitor.refresh_sources()
 
 
 def update_config(config: dict) -> None:
