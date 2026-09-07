@@ -16,7 +16,7 @@ from .parsers import PARSER_VERSION, _event_id, _merge_event, _merge_session, _m
 class AgentMonitor:
     """In-memory, read-only source scanner. Reuses parsed files unchanged on refresh."""
     def __init__(self, config=None):
-        self.config = config or load_config(); self._cache = {}; self._snapshot = None; self._generation = 0; self._revision = None
+        self.config = config or load_config(); self._cache = {}; self._snapshot = None; self._generation = 0; self._revision = None; self._live_snapshots = {}; self._live_revisions = {}
         self._sources = []; self._next_discovery = 0.0
 
     def _discover_sources(self, force: bool = False):
@@ -81,12 +81,13 @@ class AgentMonitor:
         if timezone_diag: config_diags.append(timezone_diag)
         public_config = {'timezone': tz_name, 'auto_refresh_seconds': self.config.get('auto_refresh_seconds', 5), 'paths': self.config.get('paths', {})}
         self._snapshot = {'sessions': combined.sessions, 'requests': combined.turns, 'usage': [u for t in combined.turns for u in t.usage], 'events': combined.events, 'orchestration': orchestration_graph(combined), 'diagnostics': combined.diagnostics, 'config_diagnostics': config_diags, 'config': public_config, 'timezone': tz_name, 'paths': self.config['paths'], 'scanned_at': datetime.now(timezone.utc), 'generation': self._generation, 'raw_records': combined.raw_records}
+        self._live_snapshots.clear(); self._live_revisions.clear()
         return self._snapshot
 
     def update_config(self, config: dict) -> None:
         """Apply settings atomically and discard stale source/cache identities."""
         self.config = config
-        self._cache.clear(); self._sources = []; self._next_discovery = 0.0; self._snapshot = None; self._revision = None
+        self._cache.clear(); self._sources = []; self._next_discovery = 0.0; self._snapshot = None; self._revision = None; self._live_snapshots.clear(); self._live_revisions.clear()
 
     def reload_config(self, config: dict | None = None) -> dict:
         self.update_config(config or load_config())
@@ -103,12 +104,57 @@ class AgentMonitor:
         self._next_discovery = 0
         return self.get_snapshot(force=False)
 
-    def poll_session(self, session_id: str) -> dict:
-        """One-second selected-session poll: stat known files, no directory walk."""
+    def _live_selected_snapshot(self, snapshot: dict, selected_paths: set[str], selected_keys: set[tuple[str, str]]) -> dict:
+        """Build an isolated live view without mutating the dashboard snapshot."""
+        sessions: dict[tuple[str, str], object] = {}; turns: dict[tuple[str, str, str], object] = {}; events: dict[str, object] = {}; seen_usage: set[str] = set(); diagnostics = []; raw_records = {}
+        for source in self._sources:
+            if str(source.path) not in selected_paths:
+                continue
+            key = (str(source.path), source.size, source.mtime_ns, PARSER_VERSION)
+            if key not in self._cache:
+                self._cache[key] = parse_source(source)
+            result = deepcopy(self._cache[key])
+            diagnostics.extend(result.diagnostics); raw_records.update(result.raw_records)
+            for session in result.sessions:
+                identity = (session.agent, session.session_id)
+                if identity not in selected_keys:
+                    continue
+                if identity in sessions: _merge_session(sessions[identity], session)
+                else: sessions[identity] = session
+            for event in result.events:
+                if (event.agent, event.session_id) not in selected_keys:
+                    continue
+                if event.event_id in events: _merge_event(events[event.event_id], event)
+                else: events[event.event_id] = event
+            for turn in result.turns:
+                identity = (source.agent, turn.session_id, turn.turn_id)
+                if identity[:2] not in selected_keys:
+                    continue
+                if identity in turns: _merge_turn(turns[identity], turn)
+                else: turns[identity] = turn
+        for turn in turns.values():
+            unique = []
+            for usage in turn.usage:
+                identity = _event_id(usage, turn.agent or '', turn.session_id)
+                usage.event_id = identity
+                if identity not in seen_usage:
+                    seen_usage.add(identity); unique.append(usage)
+            turn.usage[:] = unique
+        fresh_sessions = list(sessions.values()); fresh_turns = [turn for turn in turns.values() if turn.usage or turn.user_preview]
+        for session in fresh_sessions:
+            session.own_usage = [usage for turn in fresh_turns if turn.agent == session.agent and turn.session_id == session.session_id for usage in turn.usage]
+            session.child_usage = []
+        live = dict(snapshot)
+        live.update({'sessions': fresh_sessions, 'requests': fresh_turns, 'usage': [usage for turn in fresh_turns for usage in turn.usage], 'events': list(events.values()), 'diagnostics': diagnostics, 'raw_records': raw_records, 'orchestration': {}, 'scanned_at': datetime.now(timezone.utc)})
+        return live
+
+    def poll_session(self, session_id: str, agent: str | None = None) -> dict:
+        """Return an isolated selected-session live snapshot without a full recombination."""
         # Bootstrap once; steady-state polling must not enter the discovery or
         # snapshot-combination path when nothing in the selected session moved.
         snapshot = self._snapshot or self.get_snapshot()
-        selected = {path for session in snapshot['sessions'] if session.session_id == session_id for path in session.sources}
+        selected_keys = {(session.agent, session.session_id) for session in snapshot['sessions'] if session.session_id == session_id and (agent is None or session.agent == agent)}
+        selected = {path for session in snapshot['sessions'] if (session.agent, session.session_id) in selected_keys for path in (session.sources or [session.source_path])}
         refreshed = []; changed = []
         for source in self._sources:
             if str(source.path) not in selected:
@@ -122,13 +168,32 @@ class AgentMonitor:
                 # Keep the old descriptor until the next discovery reports it missing.
                 refreshed.append(source)
         self._sources = refreshed
+        live_key = (agent, session_id)
+        selected_revision = tuple(sorted((str(source.path), source.size, source.mtime_ns) for source in self._sources if str(source.path) in selected))
         if not changed:
-            return snapshot
+            if self._live_revisions.get(live_key) == selected_revision:
+                return self._live_snapshots[live_key]
+            if not selected:
+                return snapshot
+            dashboard_revision = tuple(sorted(item for item in (self._revision or ()) if item[0] in selected))
+            if live_key not in self._live_snapshots and selected_revision == dashboard_revision:
+                return snapshot
+            self._generation += 1
+            live = self._live_selected_snapshot(snapshot, selected, selected_keys)
+            live['generation'] = self._generation
+            self._live_snapshots[live_key] = live; self._live_revisions[live_key] = selected_revision
+            return live
         # Parse only changed selected files before rebuilding the derived view.
         for source in changed:
             key = (str(source.path), source.size, source.mtime_ns, PARSER_VERSION)
             self._cache[key] = parse_source(source)
-        return self.get_snapshot()
+        active = {(str(source.path), source.size, source.mtime_ns, PARSER_VERSION) for source in self._sources}
+        self._cache = {key: value for key, value in self._cache.items() if key[0] not in selected or key in active}
+        self._generation += 1
+        live = self._live_selected_snapshot(snapshot, selected, selected_keys)
+        live['generation'] = self._generation
+        self._live_snapshots[live_key] = live; self._live_revisions[live_key] = selected_revision
+        return live
 
     def recent_events(self, session_id: str | None = None, since: datetime | None = None, limit: int = 200, include_raw: bool = False) -> list:
         """Latest display logs for a selected session; raw JSON is opt-in."""
@@ -193,10 +258,10 @@ def reload_config(config: dict | None = None) -> dict:
     return _default_monitor.reload_config(config)
 
 
-def poll_session(session_id: str) -> dict:
+def poll_session(session_id: str, agent: str | None = None) -> dict:
     global _default_monitor
     if _default_monitor is None: _default_monitor = AgentMonitor()
-    return _default_monitor.poll_session(session_id)
+    return _default_monitor.poll_session(session_id, agent)
 
 
 def recent_events(session_id: str | None = None, since: datetime | None = None, limit: int = 200, include_raw: bool = False) -> list:

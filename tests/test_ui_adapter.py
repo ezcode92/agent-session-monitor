@@ -53,12 +53,43 @@ def test_orchestration_does_not_poll_live_log_until_enabled():
 import agent_monitor.ui.app as ui
 from datetime import datetime, timezone
 at=datetime(2026,9,7,tzinfo=timezone.utc)
+original_live_monitor=ui._live_monitor
 ui._live_monitor=lambda agent,sid: (_ for _ in ()).throw(AssertionError("unexpected poll"))
 snapshot={"sessions":[{"agent":"a","session_id":"r","started_at":at,"last_activity":at}],"orchestration":{"roots":[("a","r")],"children":{("a","r"):[]},"depths":{("a","r"):0},"edges":[]}}
 view={"graph_view":{"context":snapshot["orchestration"],"rollups":{("a","r"):{"total_tokens":1}}}}
-ui.orchestration(snapshot,pd.DataFrame(snapshot["sessions"]),{},view)'''
+ui.orchestration(snapshot,pd.DataFrame(snapshot["sessions"]),{},view)
+ui._live_monitor=original_live_monitor'''
     app=AppTest.from_string(source).run()
     assert not app.exception
+
+def test_orchestration_selected_subtree_uses_indented_titles_and_numeric_token_columns():
+    source='''import pandas as pd
+import agent_monitor.ui.app as ui
+from datetime import datetime, timezone
+at=datetime(2026,9,7,tzinfo=timezone.utc)
+snapshot={"sessions":[{"agent":"a","session_id":"root","title":"root","started_at":at,"last_activity":at},{"agent":"a","session_id":"child","title":"child","started_at":at,"last_activity":at}],"orchestration":{"roots":[("a","root")],"children":{("a","root"):[("a","child")],("a","child"):[]},"depths":{("a","root"):0,("a","child"):1},"edges":[]}}
+view={"graph_view":{"context":snapshot["orchestration"],"rollups":{("a","child"):{"own_total":None,"descendant_total":None,"total_tokens":None},("a","root"):{"own_total":10,"descendant_total":None,"total_tokens":30}}}}
+ui.orchestration(snapshot,pd.DataFrame(snapshot["sessions"]),{},view)'''
+    app=AppTest.from_string(source).run()
+    table=next(item.value for item in app.dataframe if {"제목","직접 토큰","하위 토큰","전체 토큰"} <= set(item.value.columns))
+    assert table["제목"].tolist()==["root","  child"]
+    assert table[["직접 토큰","하위 토큰","전체 토큰"]].apply(pd.api.types.is_numeric_dtype).all()
+    assert table["전체 토큰"].iloc[0] == 30 and pd.isna(table["전체 토큰"].iloc[1])
+
+def test_live_monitor_passes_composite_session_identity_to_polling_service():
+    source='''import agent_monitor.service as service
+import agent_monitor.ui.app as ui
+calls=[]
+original_poll_session=service.poll_session
+try:
+ service.poll_session=lambda session_id,agent=None: calls.append((session_id,agent)) or {"events":[],"generation":1}
+ ui._live_monitor("codex","same")
+finally:
+ service.poll_session=original_poll_session
+assert calls == [("same","codex")]'''
+    app=AppTest.from_string(source).run()
+    assert not app.exception
+
 def test_total_fallback_does_not_double_count_cache_read(): assert usage_total({"input_tokens":10,"cache_read_tokens":8,"output_tokens":2})==12
 def test_usage_total_requires_both_fallback_parts(): assert usage_total({"input_tokens":10}) is None
 
@@ -86,23 +117,54 @@ def test_history_log_filter_is_narrow_and_base_view_has_no_events():
     base=build_view_data({"sessions":[{"agent":"a","session_id":"same","started_at":start,"last_activity":end}],"usage":[],"requests":[],"events":snapshot["events"],"orchestration":{}},{**state,"agents":[],"projects":[],"include_events":False})
     assert base["events_df"].empty
 
-def test_history_panes_are_native_and_log_is_selected_session_only():
+def test_history_panes_are_lazy_and_realtime_polls_composite_identity():
     source='''import pandas as pd
-import streamlit as st
+import agent_monitor.service as service
 import agent_monitor.ui.app as ui
 from datetime import datetime, timezone, timedelta
 at=datetime(2026,9,7,tzinfo=timezone.utc)
+calls=[]
+def poll_session(session_id, agent=None):
+ calls.append((agent, session_id))
+ return {"events":[],"generation":1}
+original_poll_session=service.poll_session
 snapshot={"events":[{"agent":"a","session_id":"same","event_id":"keep","display":"keep","occurred_at":at},{"agent":"b","session_id":"same","event_id":"drop","display":"drop","occurred_at":at}]}
 sessions=pd.DataFrame([{"agent":"a","session_id":"same","started_at":at,"last_activity":at,"title":"one"}])
 view={"requests_df":pd.DataFrame([{"agent":"a","session_id":"same","turn_id":"t","total_tokens":3}])}
 state={"start":at-timedelta(hours=1),"end":at+timedelta(hours=1),"models":[]}
-ui._live_monitor=lambda agent,sid: st.caption(f"live:{agent}:{sid}")
-ui.history(snapshot,sessions,state,view)'''
+try:
+ service.poll_session=poll_session
+ ui.history(snapshot,sessions,state,view)
+finally:
+ service.poll_session=original_poll_session
+import streamlit as st
+st.session_state["poll-calls"]=calls'''
     app=AppTest.from_string(source).run()
     assert app.radio[0].options == ["요청","로그","실시간"]
-    for pane in app.radio[0].options:
-        app.radio[0].set_value(pane).run(timeout=10)
-        assert not app.exception
+    assert app.session_state["poll-calls"] == []
+    assert not app.button
+    app.radio[0].set_value("로그").run(timeout=10)
+    assert not app.exception
+    assert app.session_state["poll-calls"] == []
+    log_frame = next(element.value for element in app.dataframe if "event_id" in element.value.columns)
+    assert log_frame.event_id.tolist() == ["keep"]
+    app.radio[0].set_value("실시간").run(timeout=10)
+    assert not app.exception
+    assert app.session_state["poll-calls"] == [("a", "same")]
+
+def test_view_cache_reuses_same_snapshot_and_state():
+    source='''import agent_monitor.ui.app as ui
+calls=[]
+original_build_view_data=ui.build_view_data
+ui.build_view_data=lambda snapshot,state: calls.append((snapshot,state)) or {"calls":len(calls)}
+snapshot={"generation":1,"timezone":"UTC"}
+state={"start":"start","end":"end","agents":[],"projects":[],"models":[]}
+first=ui._view(snapshot,state)
+second=ui._view(snapshot,state)
+assert first is second and len(calls)==1
+ui.build_view_data=original_build_view_data'''
+    app=AppTest.from_string(source).run()
+    assert not app.exception
 def test_filtered_sessions_applies_local_period_and_agent():
     start,end=period_bounds("오늘",now=datetime(2026,9,7,12,tzinfo=timezone.utc)); result=filtered_sessions([{"session_id":"in","agent":"codex","last_activity":"2026-09-07T03:00:00Z"},{"session_id":"out","agent":"claude","last_activity":"2026-09-06T03:00:00Z"}],start,end,agents=["codex"]); assert result.session_id.tolist()==["in"]
 def test_period_bounds_uses_iana_local_midnight():

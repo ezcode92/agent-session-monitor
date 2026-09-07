@@ -54,7 +54,7 @@ def test_actual_entrypoint_renders_all_pages_with_scalar_request_values(monkeypa
     snapshot = _snapshot()
     assert snapshot["requests"] and snapshot["usage"] and snapshot["events"]
     monkeypatch.setattr(ui, "_snapshot", lambda force=False: snapshot)
-    monkeypatch.setattr(service, "poll_session", lambda session_id: snapshot)
+    monkeypatch.setattr(service, "poll_session", lambda session_id, agent=None: snapshot)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
     assert not app.exception
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "63"
@@ -66,6 +66,21 @@ def test_actual_entrypoint_renders_all_pages_with_scalar_request_values(monkeypa
     menu.set_value("작업 이력").run(timeout=20)
     request_frames = [element.value for element in app.dataframe if "total_tokens" in element.value.columns]
     assert request_frames and request_frames[-1].iloc[0]["total_tokens"] == 11
+
+
+def test_overview_renders_compact_top_ten_request_scalars():
+    source = '''import pandas as pd
+import streamlit as st
+import agent_monitor.ui.app as ui
+requests = pd.DataFrame([{"title": "unknown-first", "agent": "codex", "status": "completed", "clipped_duration_seconds": 0, "total_tokens": pd.NA, "source_label": "codex"}, *[{"title": f"request-{index}", "agent": "codex", "status": "completed", "clipped_duration_seconds": index, "total_tokens": index, "source_label": "codex"} for index in range(2, 11)], {"title": "unknown-last", "agent": "codex", "status": "completed", "clipped_duration_seconds": 1, "total_tokens": pd.NA, "source_label": "codex"}])
+ui.overview({"timezone": "UTC"}, pd.DataFrame(), {"start": None, "end": None}, {"requests_df": requests, "usage_df": pd.DataFrame(), "summary": {}})'''
+    app = AppTest.from_string(source).run(timeout=20)
+    assert not app.exception
+    table = next(element.value for element in app.dataframe if list(element.value.columns) == ["제목", "에이전트", "상태", "기간", "토큰", "출처"])
+    assert table.shape == (10, 6)
+    assert table.iloc[0].to_dict() == {"제목": "request-10", "에이전트": "codex", "상태": "completed", "기간": "10초", "토큰": "10", "출처": "codex"}
+    assert table["제목"].tolist() == [f"request-{index}" for index in range(10, 1, -1)] + ["unknown-first"]
+    assert table.iloc[-1]["토큰"] == "—"
 
 
 def test_populated_rollup_period_and_day_split_contract():
@@ -120,7 +135,7 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
         return {"selected": record_key}
 
     monkeypatch.setattr(ui, "_snapshot", lambda force=False: current["value"])
-    monkeypatch.setattr(service, "poll_session", lambda session_id: current["value"])
+    monkeypatch.setattr(service, "poll_session", lambda session_id, agent=None: current["value"])
     monkeypatch.setattr(service, "raw_event", raw_event)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
     next(radio for radio in app.radio if radio.label == "메뉴").set_value("작업 이력").run(timeout=20)

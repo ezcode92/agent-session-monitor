@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent_monitor.analysis import analyze, filter_data, interval_for_dates, orchestration_graph, split_duration_by_day
 from agent_monitor.discovery import SourceFile
-from agent_monitor.models import ParseResult, Turn, Usage
+from agent_monitor.models import LogEvent, ParseResult, Session, Turn, Usage
 from agent_monitor.parsers import parse_claude, parse_codex
 from agent_monitor.parsers import parse_sources
 from agent_monitor.service import AgentMonitor, poll_session as public_poll_session, recent_events as public_recent_events, update_config
@@ -167,6 +167,56 @@ def test_poll_session_generation_changes_only_when_selected_file_changes(tmp_pat
     assert monitor.poll_session('s') is stable
     path.write_text('{"type":"session_meta","payload":{"id":"s"}}\n{"type":"turn_context","payload":{"turn_id":"t"}}\n', encoding='utf-8')
     assert monitor.poll_session('s')['generation'] == first + 1
+
+
+def test_selected_poll_replaces_only_the_matching_agent_without_snapshot_recombination(tmp_path, monkeypatch):
+    import agent_monitor.service as service
+    roots = {agent: tmp_path / agent for agent in ('codex', 'claude')}
+    for agent, root in roots.items():
+        root.mkdir(); (root / 'same.jsonl').write_text('1', encoding='utf-8')
+
+    def parsed(source_file):
+        total = int(source_file.path.read_text(encoding='utf-8'))
+        session = Session('same', source_file.agent, None, str(source_file.path), None, source_file.agent, None, None, sources=[str(source_file.path)])
+        usage = Usage(total_tokens=total, event_id=f'{source_file.agent}-{total}', agent=source_file.agent, session_id='same')
+        turn = Turn('turn', 'same', None, None, None, usage=[usage], agent=source_file.agent)
+        event = LogEvent(f'{source_file.agent}-{total}', source_file.agent, 'same', None, str(total), str(source_file.path), source_file.agent, 'jsonl', '1')
+        return ParseResult(sessions=[session], turns=[turn], events=[event])
+
+    monkeypatch.setattr(service, 'parse_source', parsed)
+    monitor = AgentMonitor({'paths': {agent: [str(root)] for agent, root in roots.items()}})
+    initial = monitor.refresh()
+    (roots['codex'] / 'same.jsonl').write_text('30', encoding='utf-8')
+    monkeypatch.setattr(monitor, 'get_snapshot', lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('whole snapshot recombination')))
+    monkeypatch.setattr(service, 'orchestration_graph', lambda *args: (_ for _ in ()).throw(AssertionError('whole graph rebuild')))
+    updated = monitor.poll_session('same', agent='codex')
+    totals = {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in updated['requests']}
+    assert totals == {('codex', 'same'): 30}
+    assert {(event.agent, event.session_id) for event in updated['events']} == {('codex', 'same')}
+    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in initial['requests']} == {('codex', 'same'): 1, ('claude', 'same'): 1}
+    assert updated['generation'] == initial['generation'] + 1
+    legacy = monitor.poll_session('same')
+    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in legacy['requests']} == {('codex', 'same'): 30, ('claude', 'same'): 1}
+    assert legacy['generation'] > updated['generation']
+
+
+def test_selected_poll_reports_empty_old_session_after_source_replacement_until_refresh(tmp_path, monkeypatch):
+    import agent_monitor.service as service
+    path = tmp_path / 'same.jsonl'; path.write_text('same', encoding='utf-8')
+
+    def parsed(source_file):
+        sid = source_file.path.read_text(encoding='utf-8')
+        session = Session(sid, source_file.agent, None, str(source_file.path), None, sid, None, None, sources=[str(source_file.path)])
+        return ParseResult(sessions=[session], turns=[Turn('turn', sid, None, None, None, agent=source_file.agent)])
+
+    monkeypatch.setattr(service, 'parse_source', parsed)
+    monitor = AgentMonitor({'paths': {'codex': [str(tmp_path)], 'claude': [], 'antigravity': []}})
+    initial = monitor.refresh()
+    path.write_text('replacement', encoding='utf-8')
+    live = monitor.poll_session('same', agent='codex')
+    assert not live['sessions'] and initial['sessions'][0].session_id == 'same'
+    refreshed = monitor.refresh()
+    assert [session.session_id for session in refreshed['sessions']] == ['replacement']
 
 
 def test_claude_cache_is_added_and_duplicate_response_is_replaced(tmp_path):

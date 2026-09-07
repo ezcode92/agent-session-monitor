@@ -130,12 +130,24 @@ def overview(snapshot,sessions,state,view=None):
                 timeline["date"]=timeline.clip_start.dt.tz_convert(snapshot["timezone"]).dt.date
                 daily_duration=timeline.assign(duration_seconds=(timeline.clip_end-timeline.clip_start).dt.total_seconds()).groupby("date").duration_seconds.sum().reset_index()
                 st.plotly_chart(px.line(daily_duration,x="date",y="duration_seconds",title="기간 내 작업 시간"),use_container_width=True)
+    if not requests.empty:
+        recent=(requests.sort_values("total_tokens",ascending=False,na_position="last",kind="stable") if "total_tokens" in requests else requests).head(10).copy()
+        recent=pd.DataFrame({
+            "제목": recent.get("title", recent.get("turn_id", pd.Series(index=recent.index, dtype=str))),
+            "에이전트": recent.get("agent", pd.Series(index=recent.index, dtype=str)),
+            "상태": recent.get("status", pd.Series(index=recent.index, dtype=str)),
+            "기간": recent.get("clipped_duration_seconds", pd.Series(index=recent.index, dtype=float)).map(lambda value: f"{value:.0f}초" if pd.notna(value) else "—"),
+            "토큰": recent.get("total_tokens", pd.Series(index=recent.index, dtype="Int64")).map(usage_label),
+            "출처": recent.get("source_label", pd.Series(index=recent.index, dtype=str)),
+        })
+        st.subheader("요청 상위 10건")
+        st.dataframe(recent,use_container_width=True,hide_index=True)
     st.dataframe(_scalar_table(sessions),use_container_width=True,hide_index=True); st.download_button("세션 CSV",export_csv(_scalar_table(sessions)),"sessions.csv","text/csv")
 
 @st.fragment(run_every="1s")
 def _live_monitor(agent: str, sid: str):
     from agent_monitor.service import poll_session
-    monitor_id=f"{agent}:{sid}"; snapshot=poll_session(sid); key=f"events:{monitor_id}"; generation_key=f"generation:{monitor_id}"
+    monitor_id=f"{agent}:{sid}"; snapshot=poll_session(sid,agent=agent); key=f"events:{monitor_id}"; generation_key=f"generation:{monitor_id}"
     generation_changed=st.session_state.get(generation_key) not in (None,snapshot.get("generation"))
     if generation_changed:
         # Preserve the paused frozen display and baseline across replacement;
@@ -294,7 +306,19 @@ def orchestration(snapshot, sessions, state, view=None):
         keys = subtree_keys(graph, selected_key)
         subtree = data[data.apply(lambda row: (row.get("agent"), row.get("session_id")) in keys, axis=1)]
         st.subheader("선택한 루트의 전체 하위 트리")
-        st.dataframe(subtree, use_container_width=True, hide_index=True)
+        tree_rows = subtree.copy()
+        order = {key: index for index, key in enumerate(keys)}
+        tree_rows["_tree_order"] = tree_rows.apply(lambda row: order[(row.get("agent"), row.get("session_id"))], axis=1)
+        tree_rows = tree_rows.sort_values("_tree_order")
+        root_depth = graph.get("depths", {}).get(selected_key, 0)
+        titles = tree_rows.get("title", tree_rows["session_id"]).fillna("").astype(str)
+        depths = tree_rows["depth"].fillna(root_depth).astype(int)
+        tree_rows["제목"] = ["  " * max(depth - root_depth, 0) + (title or str(session_id))
+                           for depth, title, session_id in zip(depths, titles, tree_rows["session_id"])]
+        for source, label in (("own_total", "직접 토큰"), ("descendant_total", "하위 토큰"), ("total_tokens", "전체 토큰")):
+            tree_rows[label] = pd.to_numeric(tree_rows[source], errors="coerce").astype("Int64") if source in tree_rows else pd.Series(pd.NA, index=tree_rows.index, dtype="Int64")
+        columns = [name for name in ("제목", "직접 토큰", "하위 토큰", "전체 토큰", "agent", "session_id", "status", "source_label", "source_path") if name in tree_rows]
+        st.dataframe(tree_rows[columns], use_container_width=True, hide_index=True)
         node=st.selectbox("세션 드릴다운", keys, format_func=lambda value: f"{value[0]} · {value[1]}")
         st.json(subtree[(subtree.agent==node[0]) & (subtree.session_id==node[1])].iloc[0].to_dict())
         if st.toggle("실시간 로그 보기", value=False, key=f"graph-live:{node[0]}:{node[1]}"):
