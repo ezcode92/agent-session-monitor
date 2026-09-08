@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .discovery import SourceFile
+from .insights import tool_observations
 from .models import Diagnostic, LogEvent, ParseResult, Session, Turn, Usage
 
-PARSER_VERSION = '3'
+PARSER_VERSION = '4'
 
 
 def _provenance(source: SourceFile, session: Session, usages: list[Usage] | None = None) -> None:
@@ -118,7 +119,7 @@ def _event_records(source: SourceFile, sid: str, records: list[tuple[int, dict]]
             canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
             stable = hashlib.sha256(canonical.encode()).hexdigest()
         event_id = f'{source.agent}:{sid}:{stable}'
-        events.append(LogEvent(event_id, source.agent, sid, at, display, path, label, kind, str(line), [path], None, str(role), str(record.get('type') or body.get('type') or role)))
+        events.append(LogEvent(event_id, source.agent, sid, at, display, path, label, kind, str(line), [path], None, str(role), str(record.get('type') or body.get('type') or role), tool_observations(record)))
     return events
 
 

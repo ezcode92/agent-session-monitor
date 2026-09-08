@@ -1,6 +1,75 @@
 # Validation
 
-## Current checks (2026-09-08)
+## Actual-use browser and MCP integration (2026-09-09)
+
+A separate Streamlit process was launched on loopback port 18501 with actual
+local logs and isolated temporary review/analysis databases. Chromium exercised
+the running app; the health endpoint returned `ok`. Source logs were read only.
+
+- Inputs: 12 Codex sessions and 27 Antigravity sessions; seven detected projects.
+  All 27 Antigravity sessions remained unassigned to a project. No Claude logs
+  were available in this environment. These counts are a separate sample from
+  the historical 356-transcript dataset documented below.
+- Browser: overview rendering, project comparison selection, instruction
+  comparison, analysis request creation, session retrospective creation/editing,
+  custom improvement creation, report display, recommendation adoption and
+  applied-status update. Report, applied status and retrospective fields
+  persisted after a browser reload. No browser `pageerror` events were observed.
+- MCP: actual subprocess stdio initialization, discovery and calls to all 13
+  tools, plus prompt listing/retrieval. Project statistics, instructions and
+  their differences, session/event pages and validated original event reads
+  returned successfully. Job creation, claim, completion, failure and retrieval
+  were exercised against the same temporary database as the UI.
+- End-to-end: an agent claimed the UI-created cross-project request through
+  MCP, submitted a short report grounded in captured request-count evidence,
+  and the UI displayed the report and saved the adopted recommendation.
+- Expected rejections: cross-project event access, dates without timezone
+  offsets, duplicate claims, fabricated evidence IDs, invalid claim tokens and
+  repeated completion of an already completed request.
+- Residual UI issue: mouse automation for the improvement-status dropdown
+  reported an out-of-viewport option. Keyboard selection and saving succeeded;
+  the root cause was not diagnosed. Mobile layouts were not tested.
+
+This did not test an installed Codex MCP connector, unattended external-agent
+launching or a separate external model invocation. No user's MCP configuration
+or existing application databases were changed. Test drivers, private-log
+captures and screenshots remain outside the repository in a temporary folder;
+their paths are not a portable reproduction contract.
+
+## Automated regression checks (2026-09-09)
+
+```bash
+.venv/bin/python -m pytest -q
+graphify update .
+```
+
+Result: **126 passed in 15.53s**. The suite includes the existing dashboard
+regression checks and 14 personal-review, project-analysis and MCP tests.
+
+- SQLite persistence across store instances and UI restarts; composite session
+  identities, atomic membership conflict handling, and improvement status changes.
+- Repeated tool failures and file reads, input-token growth, unknown metadata,
+  evidence locations, and duplicate signal handling using synthetic records.
+- Cross-project usage coverage, unknown values, overlapping request intervals,
+  period clipping, manual project assignments, and instruction-file comparisons.
+- Instruction scope, excluded symlinks/dependency folders, original-event identity
+  checks, and rejection of unsupported report evidence and stale claim tokens.
+- Streamlit task creation, retrospective edits, signal capture, cross-project
+  analysis requests, completed report display, and improvement adoption.
+- A real stdio MCP subprocess: protocol initialization, tool discovery, statistics
+  lookup, analysis creation/claim, and grounded report submission to the shared DB.
+
+All data and databases in this automated suite are temporary and synthetic. No external model
+was invoked and no user's MCP client configuration was changed. Agent analysis
+requires connecting an MCP client and asking its agent to process the queued job;
+queue creation alone does not start an agent.
+
+The AST-only graph update completed with **544 nodes, 1,269 edges and 31
+communities**. Markdown semantic extraction was not run. This automated run
+checked UI behavior with Streamlit AppTest; subsequent actual-use browser checks
+are recorded above. Documentation updates do not represent a new test run.
+
+## Previous checks (2026-09-08)
 
 ```bash
 UV_CACHE_DIR=/tmp/agent-monitor-uv-cache uv lock --offline
@@ -55,7 +124,7 @@ local agent logs or write benchmark files.
 This is a synthetic construction-time comparison, not a browser rendering,
 collector, or real-log performance claim.
 
-## Runtime and browser checks
+## Previous runtime and browser checks (2026-09-08)
 
 A separate Streamlit server and Chromium 153 used synthetic data only (three
 Codex sessions with fifteen requests). The endpoint returned HTTP 200.
@@ -80,7 +149,7 @@ does not rebuild the orchestration graph.  A stable poll may reuse the dashboard
 snapshot.  Dashboard aggregates update on the next normal or manual refresh;
 missing files are cleared on the next discovery pass.
 
-## Actual-data checks and limits
+## Previous actual-data checks and limits (2026-09-08)
 
 Codex actual-log behavior was validated earlier. No Claude sample was available.
 The Antigravity CLI brain tree was inspected read-only: **356 transcripts,

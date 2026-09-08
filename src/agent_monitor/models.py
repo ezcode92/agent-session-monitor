@@ -89,6 +89,7 @@ class LogEvent:
     raw_record: Optional[dict] = None
     role: Optional[str] = None
     event_type: Optional[str] = None
+    tool_observations: list[dict] = field(default_factory=list)
 
 
 @dataclass(slots=True)

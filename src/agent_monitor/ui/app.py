@@ -8,6 +8,8 @@ from .adapter import append_bounded, clipped_duration_seconds, duration_label, e
 from .core import CoreContractError, load_snapshot
 from .view_data import build_view_data
 from .help_text import COLUMN_HELP
+from .review import review_page, session_review
+from .agent_analysis import agent_analysis_page
 
 _NESTED_COLUMNS={"own_usage","child_usage","usage"}
 def _scalar_table(value):
@@ -115,7 +117,7 @@ def _filters(snapshot):
     # independently reload config here, which can put date boundaries out of sync.
     timezone_name = snapshot.get("timezone") or snapshot.get("config", {}).get("timezone") or "Asia/Seoul"
     with st.sidebar:
-        st.title("Agent Session Monitor"); page=st.radio("메뉴",["개요","작업 이력","기간 분석","오케스트레이션","설정"])
+        st.title("Agent Session Monitor"); page=st.radio("메뉴",["개요","작업 이력","회고·개선","에이전트 분석","기간 분석","오케스트레이션","설정"])
         choice=st.selectbox("기간",["최근 7일","오늘","최근 30일","직접 선택"])
         dates=st.date_input("분석 기간",value=(datetime.now().date()-timedelta(days=6),datetime.now().date())) if choice=="직접 선택" else None
         start,end=period_bounds(choice,*(dates if isinstance(dates,tuple) and len(dates)==2 else (None,None)),tz_name=timezone_name)
@@ -335,7 +337,7 @@ def history(snapshot,sessions,state,view=None):
         st.caption("대표 파일과 추가 파일이 같은 세션의 기록으로 병합됩니다. 동일한 경로는 한 번만 표시합니다.")
     st.caption(f"직접 사용량 이벤트 {item.get('own_usage_count', 0)}건 · 하위 세션 사용량 이벤트 {item.get('child_usage_count', 0)}건")
     reqs=(view or {}).get("requests_df",pd.DataFrame()); reqs=reqs[(reqs.session_id.astype(str)==sid) & (reqs.agent.astype(str)==agent)] if {"session_id","agent"} <= set(reqs) else reqs
-    monitor_id=f"{agent}:{sid}"; pane=st.radio("세션 보기",["요청","로그","실시간"],horizontal=True,key=f"history-pane:{monitor_id}")
+    monitor_id=f"{agent}:{sid}"; pane=st.radio("세션 보기",["요청","로그","실시간","회고"],horizontal=True,key=f"history-pane:{monitor_id}")
     if pane == "요청":
         st.subheader("요청 사용량·시간·상태"); st.caption("선택한 세션의 요청별 토큰·상태와 기간 내 작업 시간(시:분:초)입니다. CSV에서 추가 토큰 항목과 초 단위 원본 시간을 확인할 수 있습니다.")
         request_table = _duration_table(reqs)
@@ -345,6 +347,8 @@ def history(snapshot,sessions,state,view=None):
                                     "기간 내 작업 시간 (시:분:초)":st.column_config.TextColumn("작업 시간 (시:분:초)", width="medium"),
                                     "input_tokens":st.column_config.NumberColumn("입력", width="small"), "output_tokens":st.column_config.NumberColumn("출력", width="small"), "total_tokens":st.column_config.NumberColumn("전체", width="small")})
         st.download_button("요청 CSV",export_csv(_scalar_table(reqs)),f"{sid}-requests.csv","text/csv")
+    elif pane == "회고":
+        session_review(snapshot, agent, sid)
     elif pane == "로그":
         raw_events=_history_events(snapshot,agent,sid,state)
         hide_noise=st.toggle("노이즈 이벤트 숨기기",value=True,key=f"history-noise:{monitor_id}")
@@ -526,4 +530,6 @@ def run():
     except CoreContractError as error: st.error(f"코어 서비스 계약 오류: {error}"); st.stop()
     sessions,state=_filters(snapshot)
     if state["page"]=="설정": settings(snapshot,sessions,state)
+    elif state["page"]=="회고·개선": review_page(snapshot)
+    elif state["page"]=="에이전트 분석": agent_analysis_page(snapshot, state)
     else: {"개요":overview,"작업 이력":history,"기간 분석":analysis,"오케스트레이션":orchestration}[state["page"]](snapshot,sessions,state,_view(snapshot,state))

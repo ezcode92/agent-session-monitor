@@ -13,3 +13,8 @@ agent-monitor-benchmark-*/
 sessions/
 archived_sessions/
 .agent-monitor-profile.json
+
+# Keep portable graph outputs, not machine-local caches or query history.
+graphify-out/cache/
+graphify-out/memory/
+graphify-out/.graphify_*
