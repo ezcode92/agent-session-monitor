@@ -12,6 +12,7 @@ from .review import review_page, session_review
 from .agent_analysis import agent_analysis_page
 from .navigation import navigation
 from .presentation import apply_styles, metrics, page_header, remember, saved_notice, show_notice
+from .request_detail import session_tokens, request_tools
 
 _NESTED_COLUMNS={"own_usage","child_usage","usage"}
 def _scalar_table(value):
@@ -387,6 +388,7 @@ def history(snapshot,sessions,state,view=None):
     reqs=(view or {}).get("requests_df",pd.DataFrame()); reqs=reqs[(reqs.session_id.astype(str)==sid) & (reqs.agent.astype(str)==agent)] if {"session_id","agent"} <= set(reqs) else reqs
     monitor_id=f"{agent}:{sid}"; pane=remember(st.radio,"세션 보기",options=["요청","로그","실시간","회고"],horizontal=True,key=f"history-pane:{monitor_id}")
     if pane == "요청":
+        session_tokens((view or {}).get("usage_df", pd.DataFrame()), reqs, agent, sid)
         st.header("요청 사용량·시간·상태"); st.caption("선택한 세션의 요청별 토큰·상태와 기간 내 작업 시간(시:분:초)입니다. CSV에서 추가 토큰 항목과 초 단위 원본 시간을 확인할 수 있습니다.")
         request_table = _duration_table(reqs)
         _table(request_table,width="stretch",hide_index=True,
@@ -395,6 +397,7 @@ def history(snapshot,sessions,state,view=None):
                                     "기간 내 작업 시간 (시:분:초)":st.column_config.TextColumn("작업 시간 (시:분:초)", width="medium"),
                                     "input_tokens":st.column_config.NumberColumn("입력", width="small"), "output_tokens":st.column_config.NumberColumn("출력", width="small"), "total_tokens":st.column_config.NumberColumn("전체", width="small")})
         st.download_button("요청 CSV",export_csv(_scalar_table(reqs)),f"{sid}-requests.csv","text/csv")
+        request_tools(snapshot, reqs, agent, sid, zone)
     elif pane == "회고":
         session_review(snapshot, agent, sid)
     elif pane == "로그":

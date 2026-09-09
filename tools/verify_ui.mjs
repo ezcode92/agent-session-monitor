@@ -191,7 +191,31 @@ try {
   await call('Network.setBlockedURLs', { urls: ['https://*'] });
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await navigate('/', '개요');
-  if (process.env.VERIFY_DATE_AXES) {
+  if (process.env.VERIFY_REQUEST_TOOLS) {
+    for (const theme of ['light', 'dark']) {
+      await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+      for (const width of [375, 1440]) {
+        await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+        await navigate('/history', '작업 이력');
+        await until(`!!document.querySelector('input[aria-label="추적할 요청"]')`);
+        assert(await evaluate(`document.body.innerText.includes('호출 2건') && document.body.innerText.includes('pytest -q')`), 'First request calls and input');
+        await layout(`${theme}-${width}-request-tools`);
+        await evaluate(`document.querySelector('input[aria-label="추적할 요청"]').scrollIntoView({block:'center'})`);
+        await screenshot(`${theme}-${width}-request-tools`);
+        await evaluate(`document.querySelector('input[aria-label="도구 호출 상세"]').focus()`);
+        await press('ArrowDown'); await press('ArrowDown'); await press('Enter');
+        await until(`document.body.innerText.includes('파일 없음')`);
+        await screenshot(`${theme}-${width}-failed-tool`);
+        await evaluate(`document.querySelector('input[aria-label="추적할 요청"]').focus()`);
+        await press('ArrowDown'); await press('ArrowDown'); await press('Enter');
+        await until(`document.querySelector('input[aria-label="추적할 요청"]')?.value.includes('followup')`);
+        await until(`document.body.innerText.includes('호출 1건') && document.querySelector('input[aria-label="도구 호출 상세"]')?.value.includes('결과 미확인')`);
+        await screenshot(`${theme}-${width}-pending-tool`);
+        results.push({label:`${theme}-${width}-tool-selection`, passed:true});
+      }
+    }
+    assert.deepEqual(exceptions, [], 'Browser runtime exceptions');
+  } else if (process.env.VERIFY_DATE_AXES) {
     for (const theme of ['light', 'dark']) {
       await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
       for (const width of [375, 1440]) {

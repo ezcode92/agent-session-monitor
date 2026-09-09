@@ -90,6 +90,8 @@ class LogEvent:
     role: Optional[str] = None
     event_type: Optional[str] = None
     tool_observations: list[dict] = field(default_factory=list)
+    # Assigned from the parser's request boundary, never inferred from time.
+    turn_id: Optional[str] = None
 
 
 @dataclass(slots=True)

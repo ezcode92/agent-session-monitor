@@ -1,5 +1,44 @@
 # Validation
 
+## Request tokens and tool-call history (2026-09-09)
+
+History's Request view now displays selected-session input/output/total tokens,
+per-request averages with known/total counts, and a request selector for tool
+calls/results. Session totals use filtered direct usage; tool history follows the
+entire selected request so a period boundary cannot hide its matching result.
+
+- Added optional `LogEvent.turn_id`, populated from each parser's request
+  boundary. Call/result matching is scoped to agent and session; repeated call
+  IDs use request context. A delayed result can link across a request boundary
+  only when the call ID identifies one candidate. Missing/ambiguous IDs and
+  unknown success remain explicitly unconfirmed. Input/result previews are
+  bounded to 1,000 characters; raw records are read only on button activation.
+- Parser cache version is now 5. Codex task-start/user-message records preserve
+  requests without token records. Claude user-role `tool_result` blocks no
+  longer create phantom requests or steal subsequent usage; observed end times
+  keep those requests available in the period-filtered history. Antigravity
+  USER_INPUT boundaries include request ID 0. No SQLite migration or new MCP
+  tool was introduced; usage arithmetic is unchanged.
+- Full suite: `.venv/bin/python -m pytest -q` — **148 passed in 22.71s**.
+  New checks cover Codex/Claude/Antigravity parsing, duplicate records, colliding
+  IDs across agents/sessions/requests, late/unknown/ambiguous results, missing
+  inputs, bounded previews, requests with no usage, token summaries, selection
+  restoration, no implicit polling/raw reads and raw-read failure/retry.
+- Browser: `VERIFY_REQUEST_TOOLS=1` with `tools/verify_ui.mjs` passed history
+  layout and keyboard request/tool selection at 375px/1440px in light/dark.
+  Success, failure and result-missing states and long inputs were captured;
+  desktop and narrow screenshots were inspected. No browser runtime exceptions.
+  Data and databases were temporary synthetic fixtures; physical mobile and
+  screen-reader validation were not repeated.
+- `git diff --check` passed. AST-only `graphify update .` completed with
+  **665 nodes, 1,571 edges and 41 communities**.
+
+Supported tool schemas are the existing function/custom-tool calls and results,
+Claude tool_use/tool_result, normalized tool_calls, and recognized Antigravity
+records. Unsupported formats or missing request metadata cannot establish a
+complete history and are not interpreted as zero tool usage. Existing logs can
+be reprocessed using Settings → Full rescan. Source logs remain read-only.
+
 ## Daily chart date-axis correction (2026-09-09)
 
 Plotly's automatic sub-day ticks repeated calendar labels on daily token and

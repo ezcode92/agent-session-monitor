@@ -11,7 +11,7 @@ from .discovery import SourceFile
 from .insights import tool_observations
 from .models import Diagnostic, LogEvent, ParseResult, Session, Turn, Usage
 
-PARSER_VERSION = '4'
+PARSER_VERSION = '5'
 
 
 def _provenance(source: SourceFile, session: Session, usages: list[Usage] | None = None) -> None:
@@ -85,7 +85,7 @@ def _records(source: SourceFile, diagnostics: list[Diagnostic]) -> list[tuple[in
     return result
 
 
-def _event_records(source: SourceFile, sid: str, records: list[tuple[int, dict]]) -> list[LogEvent]:
+def _event_records(source: SourceFile, sid: str, records: list[tuple[int, dict]], event_turns=None) -> list[LogEvent]:
     label, kind, path = source.source_label or source.agent, source.source_kind or source.agent, str(source.path)
     events = []
     for line, record in records:
@@ -119,7 +119,7 @@ def _event_records(source: SourceFile, sid: str, records: list[tuple[int, dict]]
             canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
             stable = hashlib.sha256(canonical.encode()).hexdigest()
         event_id = f'{source.agent}:{sid}:{stable}'
-        events.append(LogEvent(event_id, source.agent, sid, at, display, path, label, kind, str(line), [path], None, str(role), str(record.get('type') or body.get('type') or role), tool_observations(record)))
+        events.append(LogEvent(event_id, source.agent, sid, at, display, path, label, kind, str(line), [path], None, str(role), str(record.get('type') or body.get('type') or role), tool_observations(record), (event_turns or {}).get(line)))
     return events
 
 
@@ -133,17 +133,26 @@ def parse_codex(source: SourceFile) -> ParseResult:
     parent = _first(payload, 'parent_thread_id', 'parent_session_id', 'parent_id') or spawn.get('parent_thread_id')
     session = Session(sid, 'codex', str(parent) if parent is not None else None, str(source.path), _first(payload, 'cwd', 'project'), _first(payload, 'title'), None, None)
     turns: dict[str, Turn] = {}; current: str | None = None; cumulative: dict[str, dict[str, int]] = defaultdict(dict)
-    turn_models: dict[str, str] = {}
+    turn_models: dict[str, str] = {}; event_turns = {}
     # calculate fallback deltas in original order, then suppress for turns with preferred usage
     fallback: dict[str, list[Usage]] = defaultdict(list); preferred: set[str] = set(); seen: set[str] = set()
     for line, rec in records:
         kind = rec.get('type'); body = rec.get('payload') if isinstance(rec.get('payload'), dict) else rec; at = _time(_first(rec, 'timestamp', 'time') or _first(body, 'timestamp'))
         if at:
             session.started_at = min(session.started_at, at) if session.started_at else at; session.last_activity_at = max(session.last_activity_at, at) if session.last_activity_at else at
+        if kind == 'event_msg' and body.get('type') == 'task_started' and body.get('turn_id'):
+            current = str(body['turn_id'])
+            turns.setdefault(current, Turn(current, sid, None, at, None))
         if kind == 'turn_context':
             current = str(_first(body, 'turn_id', 'id') or f'line-{line}')
             turns.setdefault(current, Turn(current, sid, None, at, None, 'unknown', '', 'unknown'))
             if _first(body, 'model', 'model_name'): turn_models[current] = str(_first(body, 'model', 'model_name'))
+        owner = _first(body, 'turn_id') or current
+        event_turns[line] = str(owner) if owner is not None else None
+        if kind == 'event_msg' and body.get('type') == 'user_message' and current:
+            text = _text(body.get('message'))
+            if text and not turns[current].user_preview:
+                turns[current].user_preview = text[:80]
         if kind == 'response_item':
             item = body.get('item', body); item = item if isinstance(item, dict) else {}; role = item.get('role'); text = _text(item.get('content') or item.get('text'))
             if role == 'user' and current and not turns[current].user_preview and text: turns[current].user_preview = text[:80]
@@ -220,11 +229,12 @@ def parse_codex(source: SourceFile) -> ParseResult:
         session.status, session.status_reason = 'cancelled', 'explicit lifecycle event'
     elif last_lifecycle == 'task_error':
         session.status, session.status_reason = 'failed', 'explicit lifecycle event'
-    _provenance(source, session, [u for t in turns.values() for u in t.usage]); out.events = _event_records(source, sid, records); out.sessions.append(session); out.turns.extend(turns.values()); return out
+    _provenance(source, session, [u for t in turns.values() for u in t.usage]); out.events = _event_records(source, sid, records, event_turns); out.sessions.append(session); out.turns.extend(turns.values()); return out
 
 
 def parse_claude(source: SourceFile) -> ParseResult:
     out = ParseResult(); records = _records(source, out.diagnostics)
+    event_turns = {}
     sid = source.path.stem; project = source.path.parent.name.replace('-', '/')
     session = Session(sid, 'claude', None, str(source.path), project, None, None, None); turns: dict[str, Turn] = {}; current: str | None = None; seen: set[str] = set()
     for line, rec in records:
@@ -232,17 +242,24 @@ def parse_claude(source: SourceFile) -> ParseResult:
         session.parent_session_id = session.parent_session_id or _first(rec, 'parentSessionId', 'parent_session_id', 'parentId')
         if at:
             session.started_at = min(session.started_at, at) if session.started_at else at; session.last_activity_at = max(session.last_activity_at, at) if session.last_activity_at else at
-        is_tool_result = bool(rec.get('toolUseResult') or rec.get('isToolResult') or rtype in ('tool_result', 'user_tool_result'))
+        content = message.get('content', rec.get('content'))
+        result_blocks = isinstance(content, list) and any(isinstance(block, dict) and block.get('type') == 'tool_result' for block in content)
+        is_tool_result = bool('toolUseResult' in rec or rec.get('isToolResult') or rtype in ('tool_result', 'user_tool_result') or result_blocks)
         if role == 'user' and not is_tool_result:
             current = str(_first(rec, 'uuid', 'id') or f'line-{line}'); text = _text(message.get('content', rec.get('content', ''))) or ''
             turns[current] = Turn(current, sid, text[:80] or None, at, None)
+        event_turns[line] = current
+        if current and at and turns[current].started_at and at >= turns[current].started_at:
+            turn = turns[current]
+            turn.ended_at = max(turn.ended_at, at) if turn.ended_at else at
+            turn.duration_kind = 'observed'
         if role == 'assistant' and isinstance(message, dict) and isinstance(message.get('usage'), dict):
             usage_data = message['usage']; rid = _first(message, 'id', 'response_id') or _first(rec, 'requestId', 'uuid'); key = str(rid or f'{line}')
             # streaming records may repeat a response: keep the last record's usage.
             if key in seen:
                 for turn in turns.values(): turn.usage[:] = [u for u in turn.usage if u.response_id != rid]
             seen.add(key); target = current or 'unclassified'; usage = _usage(usage_data, 'claude.message.usage', key, at, str(rid) if rid else None, True); usage.session_id = sid; usage.turn_id = target; usage.source_path = str(source.path); usage.model = _first(message, 'model') or usage.model; turns.setdefault(target, Turn(target, sid, None, at, at)).usage.append(usage)
-    session.title = next((t.user_preview for t in turns.values() if t.user_preview), None); _set_status(session, list(turns.values())); _provenance(source, session, [u for t in turns.values() for u in t.usage]); out.events = _event_records(source, sid, records); out.sessions.append(session); out.turns.extend(turns.values()); return out
+    session.title = next((t.user_preview for t in turns.values() if t.user_preview), None); _set_status(session, list(turns.values())); _provenance(source, session, [u for t in turns.values() for u in t.usage]); out.events = _event_records(source, sid, records, event_turns); out.sessions.append(session); out.turns.extend(turns.values()); return out
 
 
 def parse_antigravity(source: SourceFile) -> ParseResult:
@@ -256,7 +273,7 @@ def parse_antigravity(source: SourceFile) -> ParseResult:
     sid = next((parent.name for parent in source.path.parents if parent.parent.name == 'brain'), source.path.parent.name)
     session = Session(sid, 'antigravity', None, str(source.path), None, None, None, None)
     out.diagnostics.append(Diagnostic(str(source.path), 'usage_unavailable', '이 transcript에서 토큰 사용량을 확인할 수 없습니다.'))
-    turns: list[Turn] = []
+    turns: list[Turn] = []; event_turns = {}
     for line, rec in records:
         at = _time(_first(rec, 'timestamp', 'time', 'created_at'))
         if at:
@@ -269,6 +286,7 @@ def parse_antigravity(source: SourceFile) -> ParseResult:
             identifier = _first(rec, 'id', 'step_index')
             turns.append(Turn(str(identifier if identifier is not None else line), sid, content[:80] if content else None,
                               at, None))
+        event_turns[line] = turns[-1].turn_id if turns else None
         if turns and at and turns[-1].started_at and at >= turns[-1].started_at:
             turn = turns[-1]
             turn.ended_at = max(turn.ended_at, at) if turn.ended_at else at
@@ -276,7 +294,7 @@ def parse_antigravity(source: SourceFile) -> ParseResult:
     session.title = next((turn.user_preview for turn in turns if turn.user_preview), None)
     # DONE describes a single step, not completion of the conversation.
     _set_status(session, turns); _provenance(source, session)
-    out.events = _event_records(source, sid, records); out.sessions.append(session); out.turns.extend(turns)
+    out.events = _event_records(source, sid, records, event_turns); out.sessions.append(session); out.turns.extend(turns)
     return out
 
 
@@ -320,6 +338,7 @@ def _merge_turn(existing: Turn, incoming: Turn) -> None:
 
 def _merge_event(existing: LogEvent, incoming: LogEvent) -> None:
     existing.sources = list(dict.fromkeys([*existing.sources, *incoming.sources]))
+    existing.turn_id = existing.turn_id or incoming.turn_id
     if incoming.occurred_at and (not existing.occurred_at or incoming.occurred_at < existing.occurred_at): existing.occurred_at = incoming.occurred_at
 
 

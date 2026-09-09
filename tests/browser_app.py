@@ -16,6 +16,7 @@ from test_app_integration import _snapshot
 from agent_monitor import config, service
 from agent_monitor.project_analysis import ProjectAnalysis
 from agent_monitor.review_store import ReviewStore
+from agent_monitor.insights import tool_observations
 from agent_monitor.ui import app as ui
 
 
@@ -51,6 +52,19 @@ def fixture():
         usage["model"] = "synthetic-model"
     for request in snapshot["requests"]:
         request["title"] = "선택 기간의 토큰·작업 시간 확인"
+    if os.environ.get("VERIFY_REQUEST_TOOLS"):
+        snapshot["requests"].append({**snapshot["requests"][0], "turn_id": "followup", "title": "후속 요청의 도구 호출 확인"})
+        for index, (tid, raw) in enumerate([
+            ("turn", {"type": "function_call", "call_id": "check", "name": "exec_command", "arguments": {"cmd": "pytest -q", "reason": "선택한 요청의 입력·출력과 도구 호출 근거를 확인합니다."}}),
+            ("turn", {"type": "function_call_output", "call_id": "check", "output": {"exit_code": 0, "text": "검증 통과"}}),
+            ("turn", {"type": "function_call", "call_id": "failed", "name": "read_file", "arguments": {"path": "/synthetic/missing.py"}}),
+            ("turn", {"type": "function_call_output", "call_id": "failed", "output": {"is_error": True, "text": "파일 없음"}}),
+            ("followup", {"type": "function_call", "call_id": "later", "name": "read_file", "arguments": {"path": "/synthetic/app.py"}}),
+        ]):
+            snapshot["events"].append({"agent": "codex", "session_id": "root", "turn_id": tid,
+                                       "event_id": f"browser-tool-{index}", "occurred_at": snapshot["scanned_at"] + timedelta(seconds=index),
+                                       "source_path": "synthetic.jsonl", "record_key": str(index+100),
+                                       "display": raw["type"], "tool_observations": tool_observations(raw)})
     snapshot["config"]["paths"] = {"codex": [str(project / "synthetic-logs")], "claude": [], "antigravity": []}
     snapshot["paths"] = snapshot["config"]["paths"]
     reviews = ReviewStore()

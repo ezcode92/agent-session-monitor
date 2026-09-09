@@ -71,22 +71,30 @@ def tool_observations(record):
             arguments = _object(node.get("arguments", node.get("input")))
             if arguments is None and agy:
                 arguments = {key: node[key] for key in ("command", "file_path", "path") if key in node} or None
-            if not name or arguments is None:
+            if not name:
                 continue
             call_id = node.get("call_id") or node.get("id")
             if call_id is None and agy and node.get("step_index") is not None:
                 call_id = f"step:{node['step_index']}"
             target = next((arguments[key] for key in ("cmd", "command", "file_path", "path") if arguments.get(key)), "") if isinstance(arguments, dict) else arguments
             observations.append({"kind": "call", "call_id": str(call_id) if call_id is not None else None,
-                                 "tool_name": str(name), "signature": _digest([name, arguments]),
-                                 "target": str(target)[:240],
+                                 "tool_name": str(name), "signature": _digest([name, arguments]) if arguments is not None else None,
+                                 "preview": _preview(arguments),
+                                 "target": str(target)[:240] if target is not None else "",
                                  "is_read": str(name).lower() in {"read", "read_file", "view_file", "functions.read_file"}})
             if agy and _failed(node) is not None:
-                observations.append({"kind": "result", "call_id": str(call_id) if call_id is not None else None, "failed": _failed(node)})
+                observations.append({"kind": "result", "call_id": str(call_id) if call_id is not None else None, "failed": _failed(node), "preview": _preview(node.get("output", node.get("content")))})
         elif kind in {"function_call_output", "custom_tool_call_output", "tool_result"}:
             call_id = node.get("call_id") or node.get("tool_use_id")
-            observations.append({"kind": "result", "call_id": str(call_id) if call_id is not None else None, "failed": _failed(node)})
+            observations.append({"kind": "result", "call_id": str(call_id) if call_id is not None else None, "failed": _failed(node), "preview": _preview(node.get("output", node.get("content")))})
     return observations
+
+
+def _preview(value):
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    return text[:1000] + ("…" if len(text) > 1000 else "")
 
 
 def _reference(value, kind="event"):
