@@ -46,11 +46,20 @@ def _chart(figure, title, description, *, data=None):
     st.header(title)
     st.caption(description)
     figure.update_layout(title={"text": ""})
-    # A one-day range still needs a visible point and readable date labels.
+    # All line charts here use calendar-day buckets. Sub-day automatic ticks
+    # would repeat the same label when formatted without a time component.
+    dates = []
     for trace in figure.data:
         if trace.type == "scatter" and trace.mode == "lines":
             trace.mode = "lines+markers"
-            figure.update_xaxes(tickformat="%m-%d")
+            dates.extend(trace.x)
+    if dates:
+        days = pd.DatetimeIndex(dates).dropna().normalize().sort_values()
+        if len(days):
+            step = max(1, ((days[-1] - days[0]).days + 5) // 6)
+            figure.update_xaxes(type="date", tickmode="linear", tick0=days[0].isoformat(),
+                                dtick=step * 86_400_000,
+                                tickformat="%Y-%m-%d" if days[0].year != days[-1].year else "%m-%d")
     st.plotly_chart(figure, width="stretch", theme="streamlit")
     if data is not None:
         with st.expander(f"{title} 데이터"):

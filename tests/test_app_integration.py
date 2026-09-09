@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from copy import deepcopy
+import pytest
 
 from streamlit.testing.v1 import AppTest
 from agent_monitor.ui.view_data import build_view_data
@@ -213,6 +214,9 @@ def test_duration_labels_and_composition_chart_use_values_and_explanations(monke
     assert {trace.name: sum(trace.y) for trace in composition.data} == {"입력(캐시 제외)": 30, "출력": 3, "캐시 읽기": 30}
     assert composition.layout.barmode == "stack"
     duration = captured["기간 내 작업 시간"]
+    for title in ("일별 전체 토큰", "기간 내 작업 시간"):
+        assert captured[title].layout.xaxis.tickmode == "linear"
+        assert captured[title].layout.xaxis.dtick >= 86_400_000
     assert "시:분:초" in duration.layout.yaxis.title.text
     assert all(label.count(":") == 2 for label in duration.layout.yaxis.ticktext)
     assert all(value[0].count(":") == 2 for value in duration.data[0].customdata)
@@ -353,3 +357,27 @@ def test_visible_table_headers_and_metrics_have_tooltips(monkeypatch):
     assert not app.exception
     table=next(item for item in app.dataframe if "P90 작업 시간 (시:분:초)" in item.value)
     assert all(json.loads(table.proto.columns)[name]["help"] for name in table.value.columns)
+
+
+@pytest.mark.parametrize("offsets", [(0,), (0, 1), (0, 3, 6), (0, 30, 400)])
+def test_date_line_ticks_are_unique_without_compressing_missing_days(monkeypatch, offsets):
+    import pandas as pd
+    import plotly.express as px
+    import agent_monitor.ui.app as ui
+
+    for name in ("header", "caption", "plotly_chart"):
+        monkeypatch.setattr(ui.st, name, lambda *args, **kwargs: None)
+    dates = [datetime(2026, 9, 7) + timedelta(days=offset) for offset in offsets]
+    figure = px.line(x=dates, y=list(range(len(dates))))
+    ui._chart(figure, "Daily", "Daily totals")
+    axis = figure.layout.xaxis
+    ticks = pd.date_range(dates[0], dates[-1], freq=pd.Timedelta(milliseconds=axis.dtick))
+    labels = ticks.strftime(axis.tickformat).tolist()
+    assert 1 <= len(labels) <= 7
+    assert len(labels) == len(set(labels))
+    assert axis.dtick >= 86_400_000 and axis.dtick % 86_400_000 == 0
+    assert pd.Timestamp(axis.tick0) == dates[0]
+    assert list(pd.to_datetime(figure.data[0].x)) == dates
+    assert figure.data[0].mode == "lines+markers"
+    if dates[-1].year != dates[0].year:
+        assert labels[0].startswith("2026-")

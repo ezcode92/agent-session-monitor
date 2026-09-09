@@ -1,5 +1,21 @@
 # Validation
 
+## Daily chart date-axis correction (2026-09-09)
+
+Plotly's automatic sub-day ticks repeated calendar labels on daily token and
+duration charts, especially with only one populated day. Date-line ticks now
+start at the first bucket and advance by whole days, with larger intervals for
+long ranges and a year in labels when the range crosses years. Data points,
+missing-day spacing and totals are unchanged.
+
+- `.venv/bin/python -m pytest -q tests/test_app_integration.py`: **15 passed in
+  9.67s**, including single-day, adjacent-day, sparse-week and cross-year cases.
+- `VERIFY_DATE_AXES=1` with `tools/verify_ui.mjs`: both overview date axes rendered
+  unique labels at 375px and 1440px in light and dark mode (8 chart checks).
+  Single-day screenshots were inspected; no browser runtime exceptions occurred.
+  These checks use the existing isolated synthetic fixture, not real logs.
+- `git diff --check` and the AST-only `graphify update .` completed.
+
 ## UI design adoption (2026-09-09)
 
 The seven pages now use native URL navigation, a shared neutral/teal light and

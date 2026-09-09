@@ -191,7 +191,27 @@ try {
   await call('Network.setBlockedURLs', { urls: ['https://*'] });
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await navigate('/', '개요');
-  if (process.env.VERIFY_THEME) {
+  if (process.env.VERIFY_DATE_AXES) {
+    for (const theme of ['light', 'dark']) {
+      await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+      for (const width of [375, 1440]) {
+        await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+        await navigate('/', '개요');
+        const charts = await evaluate(`[...document.querySelectorAll('[data-testid=stPlotlyChart]')].filter(e=>!e.closest('details')).map(e=>[...e.querySelectorAll('.xtick text')].map(t=>t.textContent))`);
+        assert.equal(charts.length, 2, 'Overview daily token and duration charts');
+        for (const labels of charts) {
+          assert(labels.length > 0, 'Date labels are visible');
+          assert.equal(new Set(labels).size, labels.length, 'No repeated calendar date labels');
+        }
+        results.push({label: `${theme}-${width}-daily-date-labels`, charts});
+        for (let index = 0; index < charts.length; index++) {
+          await evaluate(`[...document.querySelectorAll('[data-testid=stPlotlyChart]')].filter(e=>!e.closest('details'))[${index}].scrollIntoView({block:'center'})`);
+          await screenshot(`${theme}-${width}-daily-${index}`);
+        }
+      }
+    }
+    assert.deepEqual(exceptions, [], 'Browser runtime exceptions');
+  } else if (process.env.VERIFY_THEME) {
     await themeControls();
   } else if (process.env.VERIFY_INTERACTIONS) {
     await interactions();

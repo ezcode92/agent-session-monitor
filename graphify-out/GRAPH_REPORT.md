@@ -1,37 +1,37 @@
 # Graph Report - agent-session-monitor  (2026-09-09)
 
 ## Corpus Check
-- 71 files · ~48,389 words
+- 71 files · ~48,701 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 636 nodes · 1476 edges · 40 communities (34 shown, 6 thin omitted)
+- 638 nodes · 1478 edges · 40 communities (34 shown, 6 thin omitted)
 - Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 116 edges (avg confidence: 0.93)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `83beef68`
+- Built from commit: `ca5f1ba7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - test_core.py
 - build_view_data
-- CoreContractError
-- verify_ui.mjs
 - ui/app.py
+- verify_ui.mjs
+- history
 - test_ui_adapter.py
 - adapter.py
 - test_history_navigation.py
 - ProjectAnalysis
 - AgentMonitor
-- append_bounded
+- _live_monitor
 - request_timeline
-- test_antigravity.py
+- test_live_completion.py
 - ReviewStore
-- _filters
+- benchmark_monitor.py
 - design/README.md
-- settings
+- monitor_cursor
 - Validation
 - What You Must Do When Invoked
 - test_app_integration.py
@@ -77,8 +77,8 @@
   tests/test_core.py → src/agent_monitor/service.py
 - `test_snapshot_timezone_is_normalized_and_invalid_value_is_diagnostic()` --uses--> `AgentMonitor`  [INFERRED]
   tests/test_core.py → src/agent_monitor/service.py
-- `main()` --calls--> `load_config()`  [INFERRED]
-  mcp_server.py → src/agent_monitor/config.py
+- `main()` --uses--> `AgentMonitor`  [INFERRED]
+  benchmark_monitor.py → src/agent_monitor/service.py
 
 ## Import Cycles
 - None detected.
@@ -87,31 +87,31 @@
 
 ### Community 0 - "test_core.py"
 Cohesion: 0.08
-Nodes (75): analyze(), download_data(), filter_data(), interval_for_dates(), orchestration_graph(), datetime, Canonical session graph based only on parser-provided explicit parents., report() (+67 more)
+Nodes (72): analyze(), download_data(), filter_data(), interval_for_dates(), orchestration_graph(), datetime, Canonical session graph based only on parser-provided explicit parents., report() (+64 more)
 
 ### Community 1 - "build_view_data"
 Cohesion: 0.12
-Nodes (24): DataFrame, Series, filtered_requests(), filtered_usage(), Apply every dashboard filter at the normalized usage-event level., Match canonical agent/session pairs without row-wise Python calls. Older…, _selected_session_mask(), build_view_data() (+16 more)
+Nodes (26): DataFrame, Series, filtered_requests(), filtered_sessions(), filtered_usage(), Apply every dashboard filter at the normalized usage-event level., Filter session metadata only. Model and period are usage-event filters in the…, Match canonical agent/session pairs without row-wise Python calls. Older… (+18 more)
 
-### Community 2 - "CoreContractError"
-Cohesion: 0.11
-Nodes (19): main(), Testable Streamlit entrypoint; importing this module has no UI side effects., fragment, RuntimeError, _dashboard_refresh(), Independent five-second collector refresh; no custom JS is used., run(), _snapshot() (+11 more)
+### Community 2 - "ui/app.py"
+Cohesion: 0.10
+Nodes (25): main(), Testable Streamlit entrypoint; importing this module has no UI side effects., RuntimeError, normalized_timezone(), _agent_status(), _dashboard_refresh(), _filters(), Small sidebar inventory that also represents configured empty roots. (+17 more)
 
 ### Community 3 - "verify_ui.mjs"
 Cohesion: 0.25
 Nodes (17): browser, call(), evaluate(), exceptions, interactions(), layout(), navigate(), pause() (+9 more)
 
-### Community 4 - "ui/app.py"
-Cohesion: 0.14
-Nodes (23): duration_label(), Traverse only the service graph, at arbitrary depth and cycle-safe., Display elapsed seconds as hours:minutes:seconds, without a 24-hour wrap., subtree_keys(), weighted_cache_ratio(), analysis(), _chart(), _duration_axis() (+15 more)
+### Community 4 - "history"
+Cohesion: 0.17
+Nodes (23): duration_label(), export_csv(), Display elapsed seconds as hours:minutes:seconds, without a 24-hour wrap., analysis(), _chart(), _duration_axis(), _duration_line(), _duration_table() (+15 more)
 
 ### Community 5 - "test_ui_adapter.py"
-Cohesion: 0.11
-Nodes (13): usage_label(), usage_total(), _scalar_table(), _usage(), test_duration_labels_preserve_unknown_and_do_not_wrap_at_one_day(), test_event_noise_filter_is_ui_only_and_follow_can_use_all_events(), test_event_type_noise_hides_metadata_but_keeps_tool(), test_lazy_preview_never_requires_raw_and_caps_display() (+5 more)
+Cohesion: 0.09
+Nodes (17): period_bounds(), datetime, usage_label(), usage_total(), _scalar_table(), test_duration_labels_preserve_unknown_and_do_not_wrap_at_one_day(), test_event_noise_filter_is_ui_only_and_follow_can_use_all_events(), test_event_source_and_csv_provenance() (+9 more)
 
 ### Community 6 - "adapter.py"
-Cohesion: 0.15
-Nodes (31): append_unique(), clipped_duration_seconds(), event_is_noise(), event_rows(), export_csv(), filter_events(), frame(), get() (+23 more)
+Cohesion: 0.18
+Nodes (25): append_unique(), clipped_duration_seconds(), event_is_noise(), event_rows(), frame(), get(), hierarchy_rows(), lazy_preview() (+17 more)
 
 ### Community 7 - "test_history_navigation.py"
 Cohesion: 0.34
@@ -119,35 +119,35 @@ Nodes (13): history_app(), parametrize, select_cell(), snapshot_fixture(), test_
 
 ### Community 8 - "ProjectAnalysis"
 Cohesion: 0.08
-Nodes (24): main(), Standalone stdio MCP entrypoint; does not start or import Streamlit., create_server(), MCP tools backed by exactly the same project analysis service as the UI., event_evidence(), project_id(), project_root(), ProjectAnalysis (+16 more)
+Nodes (25): main(), Standalone stdio MCP entrypoint; does not start or import Streamlit., create_server(), MCP tools backed by exactly the same project analysis service as the UI., event_evidence(), project_id(), project_root(), ProjectAnalysis (+17 more)
 
 ### Community 9 - "AgentMonitor"
-Cohesion: 0.07
-Nodes (35): main(), measure(), Path, Synthetic, local-only monitor benchmark; does not read configured user logs., Measure view construction from one reused synthetic snapshot., view_benchmark(), write_log(), Read-only local log analysis for coding agents. (+27 more)
+Cohesion: 0.08
+Nodes (38): default_config(), load_config(), path_diagnostics(), Any, Path, Validate configured roots without making scan failure fatal., save_config(), scan_sources() (+30 more)
 
-### Community 10 - "append_bounded"
-Cohesion: 0.29
-Nodes (7): append_bounded(), monitor_view(), Keep a bounded live buffer while preserving the newest unique events., Pause uses its captured view; follow controls only presentation ordering., recent_records(), test_monitor_is_bounded_and_pause_view_is_frozen_with_follow_order(), test_pause_append_resume_and_recent_200()
+### Community 10 - "_live_monitor"
+Cohesion: 0.25
+Nodes (9): fragment, append_bounded(), monitor_view(), Keep a bounded live buffer while preserving the newest unique events., Pause uses its captured view; follow controls only presentation ordering., recent_records(), _live_monitor(), test_monitor_is_bounded_and_pause_view_is_frozen_with_follow_order() (+1 more)
 
 ### Community 11 - "request_timeline"
 Cohesion: 0.47
 Nodes (8): Keep each known request interval separate, clipped to the selected period., request_timeline(), request(), test_composite_session_filter_does_not_include_other_agents(), test_offset_times_are_converted_to_utc_and_missing_columns_are_empty(), test_request_intervals_keep_gaps_and_metadata_without_mutating_source(), test_selected_period_clips_partial_intervals_and_omits_outside_rows(), test_unknown_invalid_zero_and_reversed_intervals_are_omitted()
 
-### Community 12 - "test_antigravity.py"
-Cohesion: 0.33
-Nodes (11): scan_sources(), Directory traversal is bounded to the slower dashboard refresh., step(), test_brain_mirrors_merge_stable_steps_even_when_display_changes(), test_brain_steps_produce_sessions_turns_events_and_unknown_usage(), test_brain_user_step_without_content_remains_a_turn(), test_default_roots_target_brain_directories(), test_discovery_ignores_full_and_chunk_transcripts() (+3 more)
+### Community 12 - "test_live_completion.py"
+Cohesion: 0.40
+Nodes (10): codex_rows(), make_monitor(), parametrize, test_agy_empty_user_input_survives_dashboard_and_live_merge(), test_cancelled_and_failed_codex_continue_tracking(), test_initial_complete_codex_does_not_stat(), test_legacy_poll_keeps_other_agent_with_same_id_running(), test_live_completion_stops_stat_after_returning_final_event() (+2 more)
 
 ### Community 13 - "ReviewStore"
 Cohesion: 0.09
-Nodes (38): analyze_task(), _digest(), _failed(), _get(), _object(), Deterministic review signals from explicit tool observations and known usage., Normalize supported content blocks; unknown schemas supply no observations., _reference() (+30 more)
+Nodes (36): analyze_task(), _digest(), _failed(), _get(), _object(), Deterministic review signals from explicit tool observations and known usage., Normalize supported content blocks; unknown schemas supply no observations., _reference() (+28 more)
 
-### Community 14 - "_filters"
-Cohesion: 0.22
-Nodes (10): filtered_sessions(), period_bounds(), datetime, Filter session metadata only. Model and period are usage-event filters in the…, _agent_status(), _filters(), Small sidebar inventory that also represents configured empty roots., test_agent_status_keeps_configured_empty_antigravity_root() (+2 more)
+### Community 14 - "benchmark_monitor.py"
+Cohesion: 0.36
+Nodes (7): main(), measure(), Path, Synthetic, local-only monitor benchmark; does not read configured user logs., Measure view construction from one reused synthetic snapshot., view_benchmark(), write_log()
 
-### Community 16 - "settings"
-Cohesion: 0.44
-Nodes (9): default_config(), load_config(), normalized_timezone(), path_diagnostics(), Any, Path, Validate configured roots without making scan failure fatal., save_config() (+1 more)
+### Community 16 - "monitor_cursor"
+Cohesion: 0.33
+Nodes (6): filter_events(), monitor_cursor(), Apply UI filters without treating an empty selected-session set as all., Return only records after the opaque cursor and the newest cursor., test_event_filter_and_cursor_respect_time_agent_model_and_generation(), test_live_generation_resets_cursor_and_tool_is_collapsed()
 
 ### Community 17 - "Validation"
 Cohesion: 0.18
@@ -158,8 +158,8 @@ Cohesion: 0.08
 Nodes (24): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+16 more)
 
 ### Community 19 - "test_app_integration.py"
-Cohesion: 0.08
-Nodes (30): cache_resource, Streamlit presentation layer for Agent Monitor., fixture(), Synthetic browser fixture. No real collector, config or user databases. Run…, go_page(), End-to-end Streamlit checks with representative, nonempty monitor data., Exercise the real history controls against a changing synthetic collector., Run the real app.py entrypoint, rather than a hand-written page stub. (+22 more)
+Cohesion: 0.07
+Nodes (32): cache_resource, Streamlit presentation layer for Agent Monitor., fixture(), Synthetic browser fixture. No real collector, config or user databases. Run…, go_page(), parametrize, End-to-end Streamlit checks with representative, nonempty monitor data., Exercise the real history controls against a changing synthetic collector. (+24 more)
 
 ### Community 21 - "graphify reference: extra exports and benchmark"
 Cohesion: 0.22
@@ -223,13 +223,13 @@ Nodes (3): Agent Session Monitor 디자인 안내, 우선순위와 가드레일,
 
 ## Knowledge Gaps
 - **100 isolated node(s):** `agent-session-monitor`, `root`, `profile`, `server`, `browser` (+95 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 197 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 198 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `AgentMonitor` connect `AgentMonitor` to `test_core.py`, `build_view_data`, `ProjectAnalysis`, `test_antigravity.py`, `ReviewStore`?**
+- **Why does `AgentMonitor` connect `AgentMonitor` to `test_core.py`, `build_view_data`, `ProjectAnalysis`, `test_live_completion.py`, `ReviewStore`, `benchmark_monitor.py`?**
   _High betweenness centrality (0.070) - this node is a cross-community bridge._
 - **Why does `ProjectAnalysis` connect `ProjectAnalysis` to `test_core.py`, `test_app_integration.py`, `ReviewStore`?**
   _High betweenness centrality (0.040) - this node is a cross-community bridge._
