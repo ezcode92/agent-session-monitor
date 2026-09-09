@@ -7,6 +7,7 @@ import streamlit as st
 from ..insights import analyze_task
 from ..review_store import ACTION_STATES, OUTCOMES, TASK_TYPES, ReviewStore
 from .adapter import record
+from .presentation import page_header, remember, saved_notice
 
 
 def _members(snapshot):
@@ -57,6 +58,7 @@ def _actions(store, snapshot, actions, prefix):
                                       format_func=ACTION_STATES.get, key=f"action-status:{key}")
                 if st.form_submit_button("개선 항목 저장"):
                     store.update_action(action["action_id"], title=title, status=status)
+                    saved_notice("개선 항목을 저장했습니다.")
                     st.rerun()
             _evidence(snapshot, action["evidence"], key)
 
@@ -68,7 +70,8 @@ def _task(store, snapshot, task):
     occupied = {(member["agent"], member["session_id"]) for other in store.list_tasks()
                 if other["task_id"] != task_id for member in other["sessions"]}
     available = {**saved, **{key: member for key, member in current.items() if key not in occupied}}
-    st.subheader("작업 회고")
+    st.header("작업 회고")
+    st.write(f"{task['title']} · {OUTCOMES[task['outcome']]} · {TASK_TYPES[task['task_type']]}")
     st.caption("작업 결과는 직접 평가합니다. 세션 완료 상태나 토큰 수로 성공 여부를 정하지 않습니다.")
     missing = len(set(saved) - set(current))
     st.caption(f"연결 세션 {len(saved)}개 · 현재 로그 미확인 {missing}개. 회고와 문제 신호는 연결된 세션의 전체 이력을 기준으로 합니다.")
@@ -82,11 +85,12 @@ def _task(store, snapshot, task):
         went_well = st.text_area("잘된 점", value=task["went_well"], max_chars=4000, key=f"well:{task_id}")
         blocked_by = st.text_area("막힌 점", value=task["blocked_by"], max_chars=4000, key=f"blocked:{task_id}")
         next_change = st.text_area("다음에 바꿀 행동", value=task["next_change"], max_chars=4000, key=f"next:{task_id}")
-        if st.form_submit_button("회고 저장"):
+        if st.form_submit_button("회고 저장", type="primary"):
             store.save_task(task_id=task_id, title=title, task_type=kind, outcome=outcome,
                             sessions=[available[key] for key in members], went_well=went_well, blocked_by=blocked_by, next_change=next_change)
+            saved_notice("회고를 저장했습니다.")
             st.rerun()
-    st.subheader("확인할 문제 신호")
+    st.header("확인할 문제 신호")
     result = analyze_task(snapshot, task["sessions"])
     coverage = result["coverage"]
     st.caption(f"도구 호출 {coverage['tool_calls']}건 · 결과 연결 {coverage['paired_results']}건 · 입력 토큰 확인 {coverage['known_inputs']}/{coverage['usage_events']}건")
@@ -102,14 +106,19 @@ def _task(store, snapshot, task):
             _evidence(snapshot, signal["evidence"], key)
             if st.button("개선 항목으로 기록", key=f"capture:{key}", disabled=signal["signal_id"] in recorded):
                 store.add_action(task_id, signal["suggestion"], signal["evidence"], signal["signal_id"])
+                saved_notice("문제 신호를 개선 항목으로 기록했습니다.")
                 st.rerun()
             if signal["signal_id"] in recorded:
                 st.caption("이미 개선 항목으로 기록했습니다.")
-    st.subheader("이 작업의 개선 항목")
-    with st.form(f"new-action:{task_id}", clear_on_submit=True):
+    st.header("이 작업의 개선 항목")
+    if st.session_state.pop(f"clear-action:{task_id}", False):
+        st.session_state.pop(f"new-action-title:{task_id}", None)
+    with st.form(f"new-action:{task_id}"):
         action_title = st.text_input("실천할 행동", max_chars=1000, key=f"new-action-title:{task_id}")
         if st.form_submit_button("개선 항목 추가"):
             store.add_action(task_id, action_title)
+            st.session_state[f"clear-action:{task_id}"] = True
+            saved_notice("개선 항목을 추가했습니다.")
             st.rerun()
     _actions(store, snapshot, store.list_actions(task_id), f"task-actions:{task_id}")
 
@@ -122,12 +131,13 @@ def session_review(snapshot, agent, session_id):
             _task(store, snapshot, task)
             return
         member = _members(snapshot)[(agent, session_id)]
-        st.subheader("이 세션의 작업 기록")
+        st.header("이 세션의 작업 기록")
         st.caption("세션을 작업에 연결하면 결과·회고·개선 항목을 재시작 후에도 보관할 수 있습니다.")
         with st.form(f"create-task:{agent}:{session_id}"):
             title = st.text_input("새 작업 이름", value=str(member["title"])[:200], max_chars=200)
-            if st.form_submit_button("이 세션으로 작업 만들기"):
+            if st.form_submit_button("이 세션으로 작업 만들기", type="primary"):
                 store.save_task(title=title, sessions=[member])
+                saved_notice("이 세션으로 작업을 만들었습니다.")
                 st.rerun()
         tasks = store.list_tasks()
         if tasks:
@@ -137,19 +147,19 @@ def session_review(snapshot, agent, session_id):
                 task = by_id[target]
                 store.save_task(**{field: task[field] for field in ("task_id", "title", "task_type", "outcome", "went_well", "blocked_by", "next_change")},
                                 sessions=[*task["sessions"], member])
+                saved_notice("선택한 작업에 세션을 연결했습니다.")
                 st.rerun()
     except (sqlite3.Error, OSError, ValueError) as error:
         st.error(f"회고를 저장하거나 불러오지 못했습니다: {error}")
 
 
 def review_page(snapshot):
-    st.header("회고·개선")
-    st.caption("저장한 작업과 개선 항목 전체를 표시합니다. 이 화면에는 사이드바 기간·에이전트·모델 필터를 적용하지 않습니다.")
+    page_header("회고·개선", "저장한 작업과 개선 항목 전체를 표시합니다. 사이드바의 기간·에이전트·프로젝트·모델 필터는 적용하지 않습니다.")
     try:
         store = ReviewStore()
-        mode = st.radio("회고 보기", ["작업 회고", "개선 항목"], horizontal=True)
+        mode = remember(st.radio,"회고 보기",options=["작업 회고", "개선 항목"],horizontal=True,key="review-mode")
         if mode == "개선 항목":
-            status = st.selectbox("개선 항목 필터", ["open", "applied", "dismissed", "all"],
+            status = remember(st.selectbox,"개선 항목 필터",options=["open", "applied", "dismissed", "all"],key="review-status",
                                   format_func=lambda value: ACTION_STATES.get(value, "전체"))
             actions = store.list_actions()
             _actions(store, snapshot, [action for action in actions if status == "all" or action["status"] == status], "all-actions")
@@ -161,7 +171,7 @@ def review_page(snapshot):
                 st.info("작업 이력에서 세션을 선택하고, 세션 보기의 회고에서 첫 작업을 만드세요.")
             else:
                 by_id = {task["task_id"]: task for task in tasks}
-                chosen = st.selectbox("회고할 작업", list(by_id), format_func=lambda value: f"{by_id[value]['title']} · {OUTCOMES[by_id[value]['outcome']]}")
+                chosen = remember(st.selectbox,"회고할 작업",options=list(by_id),key="review-task", format_func=lambda value: f"{by_id[value]['title']} · {OUTCOMES[by_id[value]['outcome']]}")
                 _task(store, snapshot, by_id[chosen])
         if store.list_tasks():
             st.download_button("회고·개선 JSON 내보내기", store.export_json(), "agent-monitor-reviews.json", "application/json")

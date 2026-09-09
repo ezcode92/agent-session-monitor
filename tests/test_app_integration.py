@@ -5,6 +5,13 @@ from copy import deepcopy
 
 from streamlit.testing.v1 import AppTest
 from agent_monitor.ui.view_data import build_view_data
+from agent_monitor.ui.navigation import PAGES
+
+
+def go_page(app, label):
+    name = next(name for name, title, _ in PAGES if title == label)
+    page = Path(__file__).resolve().parents[1] / "src/agent_monitor/ui/pages" / f"{name}.py"
+    return app.switch_page(str(page)).run(timeout=20)
 
 
 def _snapshot():
@@ -58,12 +65,11 @@ def test_actual_entrypoint_renders_all_pages_with_scalar_request_values(monkeypa
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
     assert not app.exception
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "63"
-    menu = next(radio for radio in app.radio if radio.label == "메뉴")
-    for page in menu.options:
-        menu.set_value(page).run(timeout=20)
+    for _, label, _ in PAGES:
+        go_page(app, label)
         assert not app.exception
-    menu = next(radio for radio in app.radio if radio.label == "메뉴")
-    menu.set_value("작업 이력").run(timeout=20)
+        assert len(app.title) == 1
+    go_page(app, "작업 이력")
     request_frames = [element.value for element in app.dataframe if "total_tokens" in element.value.columns]
     assert request_frames and request_frames[-1].iloc[0]["total_tokens"] == 11
 
@@ -141,7 +147,7 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     monkeypatch.setattr(service, "poll_session", lambda session_id, agent=None: current["value"])
     monkeypatch.setattr(service, "raw_event", raw_event)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run(timeout=20)
-    next(radio for radio in app.radio if radio.label == "메뉴").set_value("작업 이력").run(timeout=20)
+    go_page(app, "작업 이력")
     next(radio for radio in app.radio if radio.label == "세션 보기").set_value("실시간").run(timeout=20)
     pause = next(toggle for toggle in app.toggle if toggle.label == "일시정지")
     pause.set_value(True).run(timeout=20)
@@ -178,7 +184,7 @@ def test_actual_pause_raw_and_generation_refresh_actions(monkeypatch):
     refreshed["generation"] = 4
     refreshed["usage"][0]["total_tokens"] = 110
     current["value"] = refreshed
-    next(radio for radio in app.radio if radio.label == "메뉴").set_value("개요").run(timeout=20)
+    go_page(app, "개요")
     refresh = next(toggle for toggle in app.toggle if toggle.label == "고급: 전체 화면 5초 자동 새로고침")
     refresh.set_value(True).run(timeout=20)
     assert next(metric for metric in app.metric if metric.label == "전체 토큰").value == "162"
@@ -190,9 +196,9 @@ def test_duration_labels_and_composition_chart_use_values_and_explanations(monke
     captured = {}
     original_chart = ui._chart
 
-    def chart(figure, title, description):
+    def chart(figure, title, description, **kwargs):
         captured[title] = figure
-        original_chart(figure, title, description)
+        original_chart(figure, title, description, **kwargs)
 
     monkeypatch.setattr(ui, "_chart", chart)
     monkeypatch.setattr(ui, "_snapshot", lambda force=False: _snapshot())
@@ -211,11 +217,11 @@ def test_duration_labels_and_composition_chart_use_values_and_explanations(monke
     assert all(label.count(":") == 2 for label in duration.layout.yaxis.ticktext)
     assert all(value[0].count(":") == 2 for value in duration.data[0].customdata)
     assert any("날짜별 토큰을 입력·출력·캐시" in caption.value for caption in app.caption)
-    next(radio for radio in app.radio if radio.label == "메뉴").set_value("작업 이력").run(timeout=20)
+    go_page(app, "작업 이력")
     assert not app.exception
     requests = next(element.value for element in app.dataframe if "기간 내 작업 시간 (시:분:초)" in element.value)
     assert requests["기간 내 작업 시간 (시:분:초)"].tolist() == ["02:00:00"]
-    next(radio for radio in app.radio if radio.label == "메뉴").set_value("기간 분석").run(timeout=20)
+    go_page(app, "기간 분석")
     assert not app.exception
     stats = next(element.value for element in app.dataframe if "평균 작업 시간 (시:분:초)" in element.value).T
     assert stats.loc["평균 작업 시간 (시:분:초)", "값"] == "02:00:00"
@@ -253,15 +259,16 @@ def test_analysis_groups_categories_by_local_day_week_month(monkeypatch):
                            ("codex",datetime(2026,9,7,16,tzinfo=timezone.utc),40)])]}
     view={"usage_df":frame(snapshot["usage"]),"requests_df":pd.DataFrame()}
     monkeypatch.setattr(ui,"_snapshot",lambda force=False:snapshot)
-    monkeypatch.setattr(ui,"_filters",lambda snapshot:(pd.DataFrame(),{"page":"기간 분석","start":start,"end":end,"agents":[],"projects":[],"models":[]}))
+    monkeypatch.setattr(ui,"_filters",lambda snapshot, page="개요":(pd.DataFrame(),{"timezone":"Asia/Seoul","page":page,"start":start,"end":end,"agents":[],"projects":[],"models":[]}))
     monkeypatch.setattr(ui,"_view",lambda snapshot,state:view)
     charts={}
     original=ui._chart
-    def chart(figure,title,description):
+    def chart(figure, title, description, **kwargs):
         charts[title]=figure
-        original(figure,title,description)
+        original(figure,title,description, **kwargs)
     monkeypatch.setattr(ui,"_chart",chart)
     app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
+    go_page(app, "기간 분석")
     def points():
         return {(trace.name,pd.Timestamp(date).strftime("%Y-%m-%d")):int(value) for trace in charts["기준별 토큰 사용량"].data for date,value in zip(trace.x,trace.y)}
     assert not app.exception
@@ -283,9 +290,9 @@ def test_composition_chart_keeps_missing_cache_components_unknown(monkeypatch):
         usage['cache_creation_tokens'] = None
     captured = {}
     original = ui._chart
-    def chart(figure, title, description):
+    def chart(figure, title, description, **kwargs):
         captured[title] = figure
-        original(figure, title, description)
+        original(figure, title, description, **kwargs)
     monkeypatch.setattr(ui, '_chart', chart)
     monkeypatch.setattr(ui, '_snapshot', lambda force=False: snapshot)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / 'app.py').run(timeout=20)
@@ -309,13 +316,13 @@ def test_request_timeline_preserves_gaps_and_removed_exports(monkeypatch):
         for index,minute in enumerate((0,30))]
     captured = {}
     original = ui._chart
-    def chart(figure,title,description):
+    def chart(figure, title, description, **kwargs):
         captured[title] = figure
-        original(figure,title,description)
+        original(figure,title,description, **kwargs)
     monkeypatch.setattr(ui,"_chart",chart)
     monkeypatch.setattr(ui,"_snapshot",lambda force=False:snapshot)
     app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
-    next(radio for radio in app.radio if radio.label=="메뉴").set_value("오케스트레이션").run(timeout=20)
+    go_page(app, "오케스트레이션")
     assert not app.exception
     assert captured["세션 실행 타임라인"].layout.yaxis.categoryarray == ("codex:root", "codex:middle", "codex:leaf")
     trace=captured["세션 실행 타임라인"].data[0]
@@ -323,9 +330,9 @@ def test_request_timeline_preserves_gaps_and_removed_exports(monkeypatch):
     assert pd.Timestamp(trace.base[1])-pd.Timestamp(trace.base[0])==timedelta(minutes=30)
     assert [row[1] for row in trace.customdata]==["00:05:00","00:05:00"]
     assert not app.get("download_button")
-    next(radio for radio in app.radio if radio.label=="메뉴").set_value("기간 분석").run(timeout=20)
+    go_page(app, "기간 분석")
     assert not app.exception
-    assert not any("직전" in item.value for item in app.subheader)
+    assert not any("직전" in item.value for item in app.header)
     assert all("previous_total" not in element.value for element in app.dataframe)
 
 
@@ -336,13 +343,13 @@ def test_visible_table_headers_and_metrics_have_tooltips(monkeypatch):
     monkeypatch.setattr(ui,"_snapshot",lambda force=False:_snapshot())
     app=AppTest.from_file(Path(__file__).resolve().parents[1]/"app.py").run(timeout=20)
     assert all(metric.proto.help for metric in app.metric)
-    next(radio for radio in app.radio if radio.label=="메뉴").set_value("작업 이력").run(timeout=20)
+    go_page(app, "작업 이력")
     assert not app.exception
     for table in app.dataframe:
         config=json.loads(table.proto.columns)
         for name in table.proto.column_order:
             assert config[name]["help"], name
-    next(radio for radio in app.radio if radio.label=="메뉴").set_value("기간 분석").run(timeout=20)
+    go_page(app, "기간 분석")
     assert not app.exception
     table=next(item for item in app.dataframe if "P90 작업 시간 (시:분:초)" in item.value)
     assert all(json.loads(table.proto.columns)[name]["help"] for name in table.value.columns)

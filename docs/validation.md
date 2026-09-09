@@ -1,5 +1,67 @@
 # Validation
 
+## UI design adoption (2026-09-09)
+
+The seven pages now use native URL navigation, a shared neutral/teal light and
+dark theme, responsive layout and documented page contracts in
+[docs/design](design/README.md). Collectors, usage calculations, MCP and database
+schemas were not changed.
+
+**Automated regression: 135 passed in 24.79s** using
+`.venv/bin/python -m pytest -q`. Existing page tests now navigate through the
+registered page files. Nine additional checks cover filter/search/selection
+restoration, refresh failures and recovery, failed settings/review/analysis
+writes with retained input, explicit restore/cancel, and theme palette contrast.
+Failure checks inject actual exceptions into the save/read operations and verify
+retry effects against isolated state or temporary databases.
+
+**Browser: 98 page/viewport/theme combinations passed** using Chromium Headless
+Shell 153.0.8010.36, Streamlit 1.63.0 and synthetic data in temporary databases.
+The test process replaces collector/config operations; no real logs or user
+databases are needed. HTTPS resources are blocked during verification.
+
+- All seven direct routes at 320×850, 375×850, 768×1024, 1024×900, 1440×1000,
+  1920×1080 and 812×375, in both system light and system dark mode.
+- Explicit Dark/Light selection in Streamlit's native theme menu changed the
+  computed app colors successfully; the menu remains open after a selection.
+- One H1 per page, no document/body-content horizontal overflow (internally
+  scrolling tables/charts/code are excluded), correct computed theme background,
+  and no browser runtime exceptions. Screenshots were captured for every case;
+  representative desktop, narrow and landscape captures were visually reviewed.
+- Keyboard Tab/Shift+Tab, select ArrowDown/Escape, expander Space/Enter with
+  stable trigger height, navigation-link Enter, search empty results and browser
+  back/forward preserving the search value passed in both themes.
+- 200% root-font scaling passed DOM reflow checks for overview, history and
+  settings in both themes. This is CSS text scaling, not browser chrome zoom;
+  native canvas data tables retain their own font size in this check.
+- Native caption opacity was found to reduce contrast and was corrected to 1.
+  DOM measurements confirmed 16px base font and 44px select inputs. Palette tests
+  check text/link/status/primary-button contrast ≥4.5:1 and borders ≥3:1 on the
+  configured adjacent surfaces. They do not certify every native canvas pixel.
+- The single-day line charts now retain a visible point. Title inset was fixed
+  after the initial capture showed overlap with native browser controls.
+
+Reproduce with an installed Chrome/Chromium executable and Node.js (tested on 24):
+
+```bash
+BROWSER_BIN=/path/to/chrome VERIFY_OUTPUT=/tmp/asm-ui-matrix node tools/verify_ui.mjs
+BROWSER_BIN=/path/to/chrome VERIFY_OUTPUT=/tmp/asm-ui-interactions VERIFY_INTERACTIONS=1 node tools/verify_ui.mjs
+```
+
+The scripts produce screenshots, JSON measurements and a server log outside the
+repository, then stop their temporary server/browser. They add no runtime or npm
+dependency. Captures are local QA artifacts, not a portable visual baseline.
+
+Limitations: 320px reflow covers the effective layout width of a 1280px viewport
+at 400% zoom; actual browser-menu 400% zoom was not tested. Physical mobile touch,
+virtual keyboard, screen readers, Safari and Firefox remain unverified. This is
+not a WCAG conformance certification. The earlier actual-log/MCP browser test
+below predates this redesign and is not substituted for these checks.
+
+`graphify update .` completed AST-only: **636 nodes, 1,476 edges, 40 communities**.
+The existing dated graph backup was preserved. Semantic document extraction and
+community relabeling were not run.
+
 ## Actual-use browser and MCP integration (2026-09-09)
 
 A separate Streamlit process was launched on loopback port 18501 with actual

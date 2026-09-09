@@ -48,7 +48,7 @@ def select_cell(app, row, column):
 def test_session_id_cell_selects_details_without_dropdown_and_deduplicates_paths():
     app = history_app()
     select_cell(app, 3, 'session_id')
-    assert any(element.value == '선택 세션 상세' for element in app.subheader)
+    assert any(element.value == '선택 세션 상세' for element in app.header)
     assert app.code[0].value == 'orphan'
     assert [element.value for element in app.code].count('synthetic-primary.jsonl') == 1
     assert [element.value for element in app.code].count('synthetic-extra.jsonl') == 1
@@ -88,7 +88,7 @@ def test_unavailable_parent_shows_notice_without_unrelated_details(row, notice):
     app = history_app()
     select_cell(app, row, 'parent_session_id')
     assert any(notice in element.value for element in app.info)
-    assert not app.code and not any(element.value == '선택 세션 상세' for element in app.subheader)
+    assert not app.code and not any(element.value == '선택 세션 상세' for element in app.header)
 
 
 def test_changed_visible_rows_clear_old_cell_selection():

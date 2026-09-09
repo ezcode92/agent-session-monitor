@@ -5,6 +5,7 @@ from agent_monitor.models import Session, Usage
 from agent_monitor.ui.app import _agent_status, _history_events, _scalar_table
 from agent_monitor.ui.adapter import append_bounded, append_unique, clipped_duration_seconds, event_rows, export_csv, filter_events, filtered_requests, filtered_sessions, filtered_usage, frame, hierarchy_rows, lazy_preview, monitor_cursor, monitor_view, period_bounds, recent_records, source_label, subtree_keys, usage_label, usage_total, weighted_cache_ratio
 from agent_monitor.ui.view_data import build_view_data
+from test_app_integration import PAGES, go_page
 
 def test_missing_usage_is_never_shown_as_zero(): assert usage_total({}) is None and usage_label(None)=="—"
 def test_record_is_shallow_for_nested_dataclass_fields():
@@ -194,10 +195,10 @@ def test_populated_app_all_pages_render_without_exceptions():
     source='''import streamlit as st\nimport agent_monitor.ui.app as ui\nfrom datetime import datetime, timezone\nat=datetime(2026,9,7,tzinfo=timezone.utc)\ns={"timezone":"UTC","config":{"timezone":"UTC","paths":{"codex":[],"claude":[],"antigravity":[]}},"sessions":[{"agent":"codex","session_id":"r","started_at":at,"last_activity_at":at,"title":"root"}],"requests":[],"usage":[],"events":[],"diagnostics":[],"config_diagnostics":[],"paths":{},"scanned_at":at,"generation":1,"orchestration":{"roots":[("codex","r")],"children":{("codex","r"):[]},"depths":{("codex","r"):0},"rollups":{("codex","r"):{"total_tokens":None,"duration_seconds":0}},"edges":[],"missing_placeholders":[],"relation_count":0,"missing_parent_count":0,"cycle_count":0}}\nui._snapshot=lambda force=False:s\nui.run()'''
     app=AppTest.from_string(source).run()
     assert not app.exception
-    for page in next(radio for radio in app.radio if radio.label == "메뉴").options:
+    for _, page, _ in PAGES:
         if page == "작업 이력":
             continue  # its independently scheduled live fragment is covered by adapter tests
-        next(radio for radio in app.radio if radio.label == "메뉴").set_value(page).run(timeout=15)
+        go_page(app, page)
         assert not app.exception
 
 def test_actual_entrypoint_populated_snapshot_pages_and_scalar_history(tmp_path):
@@ -206,9 +207,10 @@ def test_actual_entrypoint_populated_snapshot_pages_and_scalar_history(tmp_path)
     app=AppTest.from_file(str(script)).run()
     assert not app.exception
     assert next(metric.value for metric in app.metric if metric.label=="전체 토큰") == "12"
-    for page in next(radio for radio in app.radio if radio.label == "메뉴").options:
+    for _, page, _ in PAGES:
         if page == "작업 이력": continue
-        next(radio for radio in app.radio if radio.label == "메뉴").set_value(page).run(timeout=15); assert not app.exception
+        go_page(app, page)
+        assert not app.exception
 def test_monitor_is_bounded_and_pause_view_is_frozen_with_follow_order():
     buffer=[]; append_bounded(buffer,[{"event_id":str(i)} for i in range(5)],maximum=3); assert [x["event_id"] for x in buffer]==["2","3","4"]
     frozen=list(buffer); append_bounded(buffer,[{"event_id":"5"}],maximum=3); assert monitor_view(buffer,frozen,200,True)==frozen; assert [x["event_id"] for x in monitor_view(buffer,None,200,False)]==["5","4","3"]

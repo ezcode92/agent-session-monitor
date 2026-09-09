@@ -1,0 +1,70 @@
+/* Colors, fonts and borders belong to .streamlit/config.toml.
+   Scope layout to our containers; never target generated Emotion class names. */
+:root {
+  --asm-space-1: .25rem;
+  --asm-space-2: .5rem;
+  --asm-space-3: .75rem;
+  --asm-space-4: 1rem;
+  --asm-space-6: 1.5rem;
+  --asm-space-8: 2rem;
+  --asm-page-max: 76rem;
+  --asm-reading-max: 48rem;
+  --asm-metric-min: 12rem;
+  --asm-control-min: 2.75rem;
+  --asm-focus-width: 2px;
+  --asm-focus-offset: 3px;
+  --asm-gutter: clamp(var(--asm-space-4), 3vw, var(--asm-space-8));
+  --asm-region-gap: clamp(var(--asm-space-4), 2vw, var(--asm-space-6));
+}
+[data-testid="stMainBlockContainer"] {
+  max-inline-size: var(--asm-page-max);
+  padding-inline: var(--asm-gutter);
+  padding-block: calc(3.75rem + var(--asm-space-3)) var(--asm-space-8);
+}
+.st-key-asm-content, .st-key-asm-intro { min-inline-size: 0; }
+.st-key-asm-content { gap: var(--asm-region-gap); }
+.st-key-asm-intro { gap: var(--asm-space-2); }
+.st-key-asm-content :is(h1, h2, h3, p, label), [data-testid="stSidebar"] p {
+  overflow-wrap: anywhere;
+}
+.st-key-asm-content :is(h1, h2, h3) { padding-block: var(--asm-space-2); }
+.st-key-asm-content :is([data-testid="stForm"], .st-key-asm-reading, .st-key-asm-settings-fields) {
+  max-inline-size: var(--asm-reading-max);
+}
+[class*="st-key-asm-metrics-"] [data-testid="stHorizontalBlock"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--asm-metric-min)), 1fr));
+  gap: var(--asm-region-gap);
+}
+[class*="st-key-asm-metrics-"] [data-testid="stColumn"] { inline-size: 100%; min-inline-size: 0; }
+.st-key-asm-content [data-testid="stMetricValue"] { white-space: normal; overflow-wrap: anywhere; }
+/* Native captions/placeholders are translucent. Use inherited foreground for
+   readable explanations on every light/dark surface, distinguished by size. */
+:is(.st-key-asm-content, [data-testid="stSidebar"]) [data-testid="stCaptionContainer"] { color: inherit; opacity: 1; }
+:is(.st-key-asm-content, [data-testid="stSidebar"]) :is(input, textarea)::placeholder { color: inherit; opacity: 1; }
+:is(.st-key-asm-content, [data-testid="stSidebar"]) :is(button, input:not([type="checkbox"]), [data-baseweb="select"] > div, summary) {
+  min-block-size: var(--asm-control-min);
+}
+.st-key-asm-content :is(button, summary) { white-space: normal; }
+.st-key-asm-content :is([data-testid="stRadio"], [data-testid="stCheckbox"]) label { min-block-size: var(--asm-control-min); }
+.st-key-asm-content [data-testid="stExpander"] summary { padding-block: var(--asm-space-3); }
+:is(.st-key-asm-content, [data-testid="stSidebar"]) :focus-visible {
+  outline-width: var(--asm-focus-width);
+  outline-offset: var(--asm-focus-offset);
+}
+/* One responsive rule for control rows; metric grids wrap intrinsically. */
+@media (max-width: 48rem) {
+  .st-key-asm-content [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-asm-content [data-testid="stColumn"] { inline-size: 100%; flex: 1 1 100%; min-inline-size: 0; }
+  .st-key-asm-content [data-testid="stRadio"] [role="radiogroup"] { flex-wrap: wrap; }
+}
+@media (pointer: coarse) {
+  :root { --asm-control-min: 3rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-key-asm-content *, [data-testid="stSidebar"] * { scroll-behavior: auto; animation: none; transition: none; }
+}
+@media (forced-colors: active) {
+  .st-key-asm-content :is(button, input, textarea, summary) { border: 1px solid ButtonText; }
+  .st-key-asm-content :focus-visible { outline: var(--asm-focus-width) solid Highlight; }
+}
