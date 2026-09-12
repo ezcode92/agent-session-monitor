@@ -354,3 +354,7 @@ collector-performance claim.
 운영 DDNS 서버의 배포·재시작·실제 사용자 로그 실행, 실기기·스크린리더는 이번 검증에 포함하지 않는다. 정확한 CI 결과는 PR과 아래 실행 기록을 확인한다. 과거 검증 건수와 합산하지 않는다.
 
 - GitHub Actions Python 3.12 전체 회귀 테스트: 170개 실행, pytest 종료 코드 0. 실행: https://github.com/ezcode92/agent-session-monitor/actions/runs/34680691161
+
+- 최종 소스 재검증: Python 3.12 테스트 170개 통과, Chromium 합성 화면 98개 조합의 단일 H1·가로 넘침·런타임 예외 검사 통과. 실사용 로그가 아닌 tests/browser_app.py를 사용했다.
+- graphify update . 완료: 코드 AST만 갱신, LLM 호출 없음. 임시 구현 스크립트와 생성된 egg-info는 최종 소스에서 제거했다.
+- 검증 실행: https://github.com/ezcode92/agent-session-monitor/actions/runs/34680792442

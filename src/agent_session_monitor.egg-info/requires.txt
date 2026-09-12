@@ -1,6 +1,0 @@
-streamlit>=1.63
-plotly>=6.0
-pandas>=2.2
-tzlocal>=5.2
-tzdata>=2025.1
-mcp<3,>=2
