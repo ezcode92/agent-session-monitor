@@ -1,6 +1,7 @@
-"""Synthetic browser fixture. No real collector, config or user databases.
+"""Synthetic browser audit fixture. No real collector, config or user databases.
 
-Run through tools/verify_ui.mjs; this is not an application entrypoint.
+Run through tools/verify_ui.mjs or expose temporarily for external browser QA.
+This is not the real-data application entrypoint.
 """
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,8 @@ from agent_monitor.project_analysis import ProjectAnalysis
 from agent_monitor.review_store import ReviewStore
 from agent_monitor.insights import tool_observations
 from agent_monitor.ui import app as ui
+
+os.environ["AGENT_MONITOR_AUDIT_MODE"] = "synthetic"
 
 
 @st.cache_resource

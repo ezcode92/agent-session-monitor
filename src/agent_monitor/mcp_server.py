@@ -5,6 +5,72 @@ from mcp.server import MCPServer
 from mcp_types import ToolAnnotations
 
 from .project_analysis import ProjectAnalysis
+from .project_store import ProjectStore
+
+
+def _result_view(job: dict) -> dict:
+    """Return a completed report without local filesystem evidence locations."""
+    report = job["report"]
+    referenced_ids = list(dict.fromkeys(
+        evidence_id
+        for category in ("findings", "recommendations")
+        for item in report[category]
+        for evidence_id in item["evidence_ids"]
+    ))
+    evidence_by_id = {item["id"]: item for item in job["context"]["evidence_catalog"]}
+    evidence = [
+        {key: value for key, value in evidence_by_id[evidence_id].items() if key not in {"source_path", "record_key"}}
+        for evidence_id in referenced_ids
+        if evidence_id in evidence_by_id
+    ]
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "agent_name": job["agent_name"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "objective": job["context"]["objective"],
+        "project_ids": job["context"]["project_ids"],
+        "report": report,
+        "evidence": evidence,
+    }
+
+
+def create_results_server(store: ProjectStore):
+    """Create a read-only MCP surface for reviewing completed analysis reports."""
+    server = MCPServer("agent-session-monitor-results", instructions=(
+        "Read-only access to completed Agent Session Monitor reports. "
+        "Use list_analysis_reports before get_analysis_report. "
+        "Evidence is limited to the references captured by each report; local source paths and raw log records are not available."
+    ))
+    read = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+
+    @server.tool(annotations=read)
+    def list_analysis_reports(limit: int = 20) -> list[dict]:
+        """List newest completed reports (1-100), including their summaries and item counts."""
+        if isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("limit은 1~100이어야 합니다.")
+        return [{
+            "job_id": job["job_id"],
+            "agent_name": job["agent_name"],
+            "created_at": job["created_at"],
+            "updated_at": job["updated_at"],
+            "objective": job["context"]["objective"],
+            "project_ids": job["context"]["project_ids"],
+            "summary": job["report"]["summary"],
+            "finding_count": len(job["report"]["findings"]),
+            "recommendation_count": len(job["report"]["recommendations"]),
+        } for job in store.jobs("completed")[:limit] if job["report"] is not None]
+
+    @server.tool(annotations=read)
+    def get_analysis_report(job_id: str) -> dict:
+        """Read one completed report and only the evidence references used by that report."""
+        job = store.get_job(job_id)
+        if job is None or job["status"] != "completed" or job["report"] is None:
+            raise ValueError("완료된 분석 보고서를 찾을 수 없습니다.")
+        return _result_view(job)
+
+    return server
 
 
 def create_server(analysis: ProjectAnalysis):

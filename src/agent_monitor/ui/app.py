@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
+import os
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -654,6 +655,8 @@ def run():
     st.session_state["ui-context"] = (snapshot, sessions, state)
     with st.container(key="asm-content"):
         show_notice()
+        if os.environ.get("AGENT_MONITOR_AUDIT_MODE") == "synthetic":
+            st.info("외부 브라우저 점검용 합성 데이터입니다. 실제 세션 로그와 사용자 데이터베이스는 사용하지 않습니다.")
         page.run()
 
 

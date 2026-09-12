@@ -41,6 +41,14 @@ uv run streamlit run app.py --server.address 127.0.0.1 --server.port 8501
 
 브라우저에서 `http://127.0.0.1:8501`을 엽니다.
 
+## 외부 브라우저 점검과 ChatGPT Web
+
+ipTIME DDNS의 HTTP 주소를 TinyFish가 점검하게 할 때는 실제 개인 로그 대신 기존 합성
+브라우저 fixture를 임시 공개합니다. ChatGPT Web의 실시간 보고서 조회는 HTTP DDNS가
+아니라 OpenAI Secure MCP Tunnel과 완료 보고서 읽기 전용 MCP 범위를 사용합니다. 포트
+포워딩, 점검 명령, 연결 절차와 보안 제한은 [외부 점검·연결 안내](docs/remote-access.md)에
+정리했습니다.
+
 ## 화면
 
 사이드바의 페이지 링크로 화면을 이동하며 각 화면의 URL을 직접 열 수 있습니다. 기간·필터와 주요 검색·선택값은 같은 브라우저 세션에서 화면을 오가도 유지됩니다. 오른쪽 위 메뉴에서 시스템 설정·라이트·다크 테마를 선택합니다. 화면별 필터 적용 범위는 제목 아래에 표시합니다.
@@ -79,6 +87,10 @@ uv run --locked python mcp_server.py
 ```
 
 앱은 별도 화면 없이 stdio MCP 서버로 실행할 수 있습니다. 연결한 에이전트에 프로젝트 통계·지침 비교·세션 근거를 제공하고, 분석 보고서와 개선 제안을 돌려받습니다. 분석 요청 생성만으로 에이전트가 자동 실행되지는 않으며, 분석에는 연결한 에이전트의 데이터 전송·과금 설정이 적용됩니다.
+
+ChatGPT Web에서 완료된 보고서만 읽을 때는 `uv run --locked python mcp_server.py
+--scope results`를 Secure MCP Tunnel의 stdio 대상으로 사용합니다. 이 범위는 원본 로그와
+로컬 파일 위치를 반환하지 않습니다.
 
 프로젝트 연결과 분석 기록은 `.agent-monitor/analysis.sqlite3`에 저장합니다. `AGENT_MONITOR_ANALYSIS_DB` 또는 서버의 `--analysis-db`로 경로를 바꿀 수 있으며 UI와 MCP에서 동일한 파일을 사용해야 합니다. 시작 명령·Codex 연결·도구 목록·보고서 형식은 [MCP 연결 안내](docs/mcp.md)에 있습니다.
 

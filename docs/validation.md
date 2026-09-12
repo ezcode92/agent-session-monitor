@@ -1,5 +1,47 @@
 # Validation
 
+## TinyFish audit access and ChatGPT report reader (2026-09-12)
+
+The project now has two deliberately separate remote paths. The synthetic
+`tests/browser_app.py` fixture can be bound to all interfaces for temporary
+TinyFish UI inspection, while `mcp_server.py --scope results` exposes only
+completed reports over stdio for an OpenAI Secure MCP Tunnel. The normal MCP
+worker API, collectors and SQLite schema are unchanged.
+
+- Corrected the attempted Streamlit wildcard bind from `0.0.0.1` to
+  `0.0.0.0`. The documented local real-data commands still override it with
+  `127.0.0.1`. The externally documented command runs the synthetic fixture,
+  which now displays an explicit synthetic-data notice and uses temporary
+  databases.
+- The results MCP advertises exactly `list_analysis_reports` and
+  `get_analysis_report`, both with `readOnlyHint=true`. An actual MCP client
+  subprocess initialized the server, discovered both tools, listed and fetched
+  a completed report, and confirmed that `source_path` and `record_key` were
+  absent from returned evidence.
+- Focused MCP/project-analysis checks passed: **8 passed in 4.30s** using a
+  clean non-repository temporary root.
+- Full suite: `.venv/bin/python -m pytest -q
+  --basetemp=/var/tmp/asm-pytest-full-78418` — **149 passed in 22.08s**.
+- A synthetic Streamlit process started on `0.0.0.0:18502` with the documented
+  public-host/browser-port options. Local requests returned `ok` from
+  `/_stcore/health` and HTTP **200** from `/`; the process was then stopped.
+- `mcp_server.py --help` lists both `analysis` and `results` scopes, and
+  `git diff --check` passed (Git only reported the repository's existing
+  LF-to-CRLF normalization notices).
+
+The sandbox cannot open listening sockets or complete the SDK's asynchronous
+stdio transport, so the Streamlit and MCP process checks were run with host
+permissions. `/tmp/.git` also makes pytest fixtures appear to share one Git
+root, so project-analysis checks used `/var/tmp` as their isolated base.
+
+Not tested: the user's ipTIME port-forward/firewall state, cellular access to
+`ezcode92.iptime.org`, a real TinyFish run, or a real Secure MCP Tunnel/ChatGPT
+workspace connection. Those require router changes, external network access and
+user-owned OpenAI/TinyFish credentials. No router, ChatGPT workspace or tunnel
+configuration was changed. Public plugin distribution still requires a stable
+HTTPS Streamable HTTP endpoint; the HTTP-only DDNS path is documented only for
+the temporary synthetic browser audit.
+
 ## Request tokens and tool-call history (2026-09-09)
 
 History's Request view now displays selected-session input/output/total tokens,

@@ -6,6 +6,10 @@ import subprocess
 import sys
 from threading import Thread
 
+import anyio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
 from agent_monitor.project_analysis import project_id
 from agent_monitor.project_store import ProjectStore
 
@@ -75,3 +79,62 @@ def test_stdio_handshake_statistics_and_agent_report_round_trip(tmp_path):
     finally:
         process.terminate()
         process.wait(timeout=10)
+
+
+def test_results_scope_lists_completed_reports_without_local_source_locations(tmp_path):
+    database = tmp_path / "analysis.sqlite3"
+    store = ProjectStore(database)
+    context = {
+        "objective": "Review the completed analysis",
+        "project_ids": ["project:synthetic"],
+        "evidence_catalog": [
+            {"id": "stat:requests", "kind": "statistic", "project_id": "project:synthetic", "metric": "request_count", "value": 3},
+            {"id": "event:failure", "kind": "event", "project_id": "project:synthetic", "agent": "codex",
+             "session_id": "session-1", "event_id": "event-1", "source_path": "/private/session.jsonl", "record_key": "7"},
+        ],
+    }
+    job_id = store.create_job(context)
+    claim = store.claim(job_id, "Synthetic MCP agent")
+    report = {
+        "summary": "Three requests included one recorded failure.",
+        "findings": [{"title": "Recorded failure", "detail": "The captured event is the evidence.",
+                      "evidence_ids": ["event:failure"]}],
+        "recommendations": [{"title": "Review failures", "rationale": "Use the captured request count.",
+                             "evidence_ids": ["stat:requests"], "project_ids": ["project:synthetic"]}],
+    }
+    store.finish(job_id, claim["claim_token"], report=report)
+    server = Path(__file__).resolve().parents[1] / "mcp_server.py"
+
+    async def exercise():
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=[str(server), "--scope", "results", "--analysis-db", str(database)],
+        )
+        async with stdio_client(parameters) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                assert {tool.name for tool in tools.tools} == {"list_analysis_reports", "get_analysis_report"}
+                assert all(tool.annotations.model_dump(by_alias=True)["readOnlyHint"] for tool in tools.tools)
+                listed = await session.call_tool("list_analysis_reports", {"limit": 10})
+                assert not listed.is_error
+                summaries = listed.structured_content["result"]
+                assert summaries == [{
+                    "job_id": job_id,
+                    "agent_name": "Synthetic MCP agent",
+                    "created_at": summaries[0]["created_at"],
+                    "updated_at": summaries[0]["updated_at"],
+                    "objective": context["objective"],
+                    "project_ids": context["project_ids"],
+                    "summary": report["summary"],
+                    "finding_count": 1,
+                    "recommendation_count": 1,
+                }]
+                fetched = await session.call_tool("get_analysis_report", {"job_id": job_id})
+                assert not fetched.is_error
+                result = json.loads(fetched.content[0].text)
+                assert result["report"] == report
+                assert {item["id"] for item in result["evidence"]} == {"event:failure", "stat:requests"}
+                assert all("source_path" not in item and "record_key" not in item for item in result["evidence"])
+
+    anyio.run(exercise)

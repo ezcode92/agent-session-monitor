@@ -141,6 +141,7 @@ agent_analysis_page(st.session_state["fixture"], {"start": None, "end": None})
     app.session_state["fixture"] = snapshot
     app.run(timeout=20)
     assert not app.exception
+    assert any("--scope results" in item.value for item in app.code)
     next(item for item in app.radio if item.label == "분석 범위").set_value("프로젝트 간 비교").run(timeout=20)
     select = next(item for item in app.multiselect if item.label.startswith("비교할 프로젝트"))
     select.set_value([item["project_id"] for item in service.catalog()["projects"]]).run(timeout=20)

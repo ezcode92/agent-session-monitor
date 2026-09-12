@@ -36,6 +36,18 @@ uv run --locked python mcp_server.py
 두 번째 명령은 stdio MCP 서버를 시작하므로 터미널에서 HTTP 주소를 출력하지 않는다.
 MCP 클라이언트가 자식 프로세스로 시작해 stdin/stdout으로 통신하도록 설정한다.
 
+완료된 분석 보고서를 읽기만 하는 별도 범위는 다음과 같이 시작한다.
+
+```bash
+uv run --locked python mcp_server.py --scope results
+```
+
+이 범위는 `list_analysis_reports`, `get_analysis_report`만 제공한다. 완료 보고서가 참조한
+근거는 함께 반환하지만 로컬 `source_path`와 `record_key`는 제거하며, 원본 로그 조회나
+분석 상태 변경은 허용하지 않는다. ChatGPT Web에서는 이 stdio 명령을 OpenAI Secure MCP
+Tunnel에 연결할 수 있다. HTTP 전용 DDNS 주소는 공개 MCP URL 요건을 충족하지 않는다.
+구체적인 터널·수동 JSON 업로드 절차는 [외부 점검·연결 안내](remote-access.md)를 따른다.
+
 Codex 연결 예시에서 `/path/to/agent-session-monitor`는 저장소의 절대 경로다.
 앱의 `에이전트 분석 > MCP 연결 안내`에는 현재 경로가 반영된 명령이 표시된다.
 

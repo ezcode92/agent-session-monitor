@@ -129,9 +129,14 @@ def agent_analysis_page(snapshot, state):
         _project_settings(service, snapshot)
         with st.expander("MCP 연결 안내"):
             root = Path(__file__).resolve().parents[3]
+            st.markdown("**로컬 분석 에이전트 · 전체 도구**")
             command = ["codex", "mcp", "add", "agent-session-monitor", "--", "uv", "--directory", str(root), "run", "--locked", "python", str(root / "mcp_server.py")]
             st.code(shlex.join(command), language="bash")
             st.caption("연결 후 사용 중인 에이전트 세션에 아래 분석 요청을 전달하세요. 대기 요청을 만드는 것만으로 에이전트가 자동 실행되지는 않습니다. 사용 중인 에이전트의 데이터 전송·과금 설정이 적용됩니다.")
+            st.markdown("**ChatGPT Web · 완료 보고서 읽기 전용**")
+            results_command = ["uv", "--directory", str(root), "run", "--locked", "python", str(root / "mcp_server.py"), "--scope", "results"]
+            st.code(shlex.join(results_command), language="bash")
+            st.caption("이 명령을 OpenAI Secure MCP Tunnel의 stdio 대상으로 연결하면 완료된 보고서와 사용한 근거만 조회할 수 있습니다. 원본 로그와 로컬 파일 위치는 제공하지 않습니다.")
         st.header("분석 요청과 결과")
         if st.button("분석 결과 새로고침"):
             st.rerun()
