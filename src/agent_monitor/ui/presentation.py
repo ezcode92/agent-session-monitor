@@ -41,7 +41,7 @@ def remember(widget, label, *, key, **kwargs):
                 continue
             value = st.session_state[identity]
             if widget == st.multiselect:
-                st.session_state[identity] = [item for item in value if item in options]
+                st.session_state[identity] = [item for item in value if item in options] if isinstance(value, (list, tuple)) else []
             elif value not in options:
                 st.session_state.pop(identity, None)
     if widget_key not in st.session_state and key in st.session_state:

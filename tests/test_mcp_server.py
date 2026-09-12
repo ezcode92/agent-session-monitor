@@ -65,6 +65,13 @@ def test_stdio_handshake_statistics_and_agent_report_round_trip(tmp_path):
         tools = send("tools/list", {})["tools"]
         assert {"get_project_statistics", "compare_project_instructions", "get_event_source", "complete_analysis_job"} <= {item["name"] for item in tools}
         assert next(item for item in tools if item["name"] == "get_project_statistics")["annotations"]["readOnlyHint"]
+        logs_tool = next(item for item in tools if item["name"] == "analyze_project_work_logs")
+        assert logs_tool["annotations"]["readOnlyHint"]
+        before = database.read_bytes()
+        logs = call("analyze_project_work_logs", {"project_id": pid})
+        assert logs["project_id"] == pid and logs["status"] == "insufficient_evidence"
+        assert logs["report"]["recommendations"] == []
+        assert database.read_bytes() == before
         statistics = call("get_project_statistics", {"project_ids": [pid]})
         assert statistics["projects"][0]["usage"]["total_tokens"] is None
         created = call("create_analysis_job", {"project_ids": [pid], "objective": "Review the project"})
@@ -90,7 +97,7 @@ def test_results_scope_lists_completed_reports_without_local_source_locations(tm
         "evidence_catalog": [
             {"id": "stat:requests", "kind": "statistic", "project_id": "project:synthetic", "metric": "request_count", "value": 3},
             {"id": "event:failure", "kind": "event", "project_id": "project:synthetic", "agent": "codex",
-             "session_id": "session-1", "event_id": "event-1", "source_path": "/private/session.jsonl", "record_key": "7"},
+             "session_id": "session-1", "event_id": "event-1", "source_path": "/private/session.jsonl", "record_key": "7", "preview": "private command must not be exported"},
         ],
     }
     job_id = store.create_job(context)
@@ -135,6 +142,6 @@ def test_results_scope_lists_completed_reports_without_local_source_locations(tm
                 result = json.loads(fetched.content[0].text)
                 assert result["report"] == report
                 assert {item["id"] for item in result["evidence"]} == {"event:failure", "stat:requests"}
-                assert all("source_path" not in item and "record_key" not in item for item in result["evidence"])
+                assert all("source_path" not in item and "record_key" not in item and "preview" not in item for item in result["evidence"])
 
     anyio.run(exercise)

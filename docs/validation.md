@@ -344,3 +344,13 @@ refresh 2.025s before the unchanged-snapshot fast path, unchanged selected
 poll below 0.001s, and changed selected poll 2.849s.  These figures predate
 the current continuation; rerun `benchmark_monitor.py` before making a current
 collector-performance claim.
+
+## 2026-09-12: Codex 전용 수집과 프로젝트 로그 분석
+
+수집 진입점은 Codex만 사용하고 기존 Claude·AGY 경로·원본·회고는 보존한다. 프로젝트별 규칙 기반 분석, 근거·우선순위·검증 방법, 멱등 보고서 저장과 개선안 채택·적용 및 읽기 전용 MCP 도구를 추가했다.
+
+로컬 Python 3.13 환경에서 순수 로직 테스트 73개와 compileall을 통과했다. Streamlit·MCP·graphify 설치는 DNS 제한으로 완료하지 못했으므로 전체 테스트는 GitHub Actions Python 3.12 환경에서 별도로 실행한다. 새 AppTest는 실행·저장·채택·적용·재실행·실패 재시도·빈 상태·필터를 검사하고 stdio MCP는 실제 새 도구 호출과 DB 불변·결과 범위의 미리보기 제외를 검사한다.
+
+운영 DDNS 서버의 배포·재시작·실제 사용자 로그 실행, 실기기·스크린리더는 이번 검증에 포함하지 않는다. 정확한 CI 결과는 PR과 아래 실행 기록을 확인한다. 과거 검증 건수와 합산하지 않는다.
+
+- GitHub Actions Python 3.12 전체 회귀 테스트: 170개 실행, pytest 종료 코드 0. 실행: https://github.com/ezcode92/agent-session-monitor/actions/runs/34680691161

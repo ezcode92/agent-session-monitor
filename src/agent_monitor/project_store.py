@@ -84,6 +84,17 @@ class ProjectStore:
             connection.execute("INSERT INTO jobs VALUES (?, 'pending', ?, NULL, NULL, NULL, NULL, ?, ?)", (identity, _json(context), now, now))
         return identity
 
+    def save_log_report(self, context, report):
+        """Atomically save one deterministic local report; preserve accepted actions."""
+        payload = json.dumps([context, report], ensure_ascii=False, sort_keys=True, default=str)
+        identity = "logs-" + hashlib.sha256(payload.encode()).hexdigest()[:32]
+        now = _now()
+        with self.connection(write=True) as connection:
+            connection.execute("""INSERT INTO jobs VALUES (?, 'completed', ?, ?, NULL, ?, NULL, ?, ?)
+                ON CONFLICT(job_id) DO NOTHING""", (identity, _json(context),
+                "local-codex-rules/v1", _json(report), now, now))
+        return self.get_job(identity)
+
     @staticmethod
     def _job(row):
         if row is None:

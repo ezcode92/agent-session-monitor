@@ -11,16 +11,27 @@ CONFIG_PATH = Path('.agent-monitor') / 'config.json'
 
 def default_config() -> dict[str, Any]:
     codex = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
-    claude = Path(os.environ.get('CLAUDE_CONFIG_DIR', Path.home() / '.claude'))
-    gemini = Path.home() / '.gemini'
     return {
         'timezone': None, 'auto_refresh_seconds': 5,
         'paths': {
             'codex': [str(codex / 'sessions'), str(codex / 'archived_sessions')],
-            'claude': [str(claude / 'projects')],
-            'antigravity': [str(gemini / x / 'brain') for x in ('antigravity', 'antigravity-cli', 'antigravity-ide')],
         },
     }
+
+
+def codex_only_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Keep legacy paths inactive without deleting settings or source files."""
+    result = dict(config)
+    paths = config.get('paths', {})
+    if not isinstance(paths, dict):
+        paths = {}
+    archived = config.get('deprecated_paths', {})
+    archived = dict(archived) if isinstance(archived, dict) else {}
+    archived.update({agent: roots for agent, roots in paths.items() if agent != 'codex'})
+    result['paths'] = {'codex': list(paths.get('codex', [])) if isinstance(paths.get('codex'), list) else []}
+    if archived:
+        result['deprecated_paths'] = archived
+    return result
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
@@ -35,18 +46,18 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     base = default_config()
     base.update({k: v for k, v in data.items() if k != 'paths'})
     if isinstance(data.get('paths'), dict): base['paths'].update(data['paths'])
-    return base
+    return codex_only_config(base)
 
 
 def save_config(config: dict[str, Any], path: Path = CONFIG_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+    path.write_text(json.dumps(codex_only_config(config), ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def path_diagnostics(config: dict[str, Any]) -> list[dict[str, str]]:
     """Validate configured roots without making scan failure fatal."""
     diagnostics = []
-    for agent, roots in config.get('paths', {}).items():
+    for agent, roots in codex_only_config(config)['paths'].items():
         for root_text in roots if isinstance(roots, list) else []:
             root = Path(root_text).expanduser()
             try:

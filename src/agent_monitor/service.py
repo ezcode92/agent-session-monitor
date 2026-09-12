@@ -6,7 +6,7 @@ from pathlib import Path
 from time import monotonic
 from datetime import datetime, timezone
 
-from .config import load_config, normalized_timezone, path_diagnostics
+from .config import codex_only_config, load_config, normalized_timezone, path_diagnostics
 from .analysis import orchestration_graph
 from .discovery import scan_sources
 from .models import ParseResult
@@ -16,7 +16,7 @@ from .parsers import PARSER_VERSION, _event_id, _merge_event, _merge_session, _m
 class AgentMonitor:
     """In-memory, read-only source scanner. Reuses parsed files unchanged on refresh."""
     def __init__(self, config=None):
-        self.config = config or load_config(); self._cache = {}; self._snapshot = None; self._generation = 0; self._revision = None; self._live_snapshots = {}; self._live_revisions = {}
+        self.config = codex_only_config(config or load_config()); self._cache = {}; self._snapshot = None; self._generation = 0; self._revision = None; self._live_snapshots = {}; self._live_revisions = {}
         self._sources = []; self._next_discovery = 0.0
 
     def _discover_sources(self, force: bool = False):
@@ -86,7 +86,7 @@ class AgentMonitor:
 
     def update_config(self, config: dict) -> None:
         """Apply settings atomically and discard stale source/cache identities."""
-        self.config = config
+        self.config = codex_only_config(config)
         self._cache.clear(); self._sources = []; self._next_discovery = 0.0; self._snapshot = None; self._revision = None; self._live_snapshots.clear(); self._live_revisions.clear()
 
     def reload_config(self, config: dict | None = None) -> dict:

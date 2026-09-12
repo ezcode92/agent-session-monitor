@@ -101,14 +101,15 @@ def test_legacy_poll_keeps_other_agent_with_same_id_running(tmp_path, monkeypatc
     assert {session.agent for session in snapshot['sessions']} == {'codex', 'claude'}
 
 
-def test_agy_empty_user_input_survives_dashboard_and_live_merge(tmp_path):
+def test_deprecated_agy_is_not_read_by_dashboard_or_live_poll(tmp_path):
     path = tmp_path / 'antigravity-cli' / 'brain' / 'same' / '.system_generated' / 'logs' / 'transcript.jsonl'
     rows = [{'step_index': 0, 'type': 'USER_INPUT', 'status': 'DONE', 'created_at': '2026-01-01T00:00:00Z'}]
     write_rows(path, rows)
     monitor = AgentMonitor({'timezone': 'UTC', 'paths': {'codex': [], 'claude': [], 'antigravity': [str(tmp_path / 'antigravity-cli')]}})
     snapshot = monitor.get_snapshot()
-    assert len(snapshot['requests']) == 1 and snapshot['requests'][0].user_preview is None
+    assert snapshot['requests'] == []
     rows.append({'step_index': 1, 'type': 'PLANNER_RESPONSE', 'status': 'DONE', 'created_at': '2026-01-01T00:00:05Z', 'content': 'Synthetic reply'})
     write_rows(path, rows)
     live = monitor.poll_session('same', 'antigravity')
-    assert len(live['requests']) == 1 and live['requests'][0].ended_at.second == 5
+    assert live['requests'] == []
+    assert path.exists()  # Deprecation never deletes original logs.

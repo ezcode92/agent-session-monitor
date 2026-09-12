@@ -19,7 +19,7 @@ def _result_view(job: dict) -> dict:
     ))
     evidence_by_id = {item["id"]: item for item in job["context"]["evidence_catalog"]}
     evidence = [
-        {key: value for key, value in evidence_by_id[evidence_id].items() if key not in {"source_path", "record_key"}}
+        {key: value for key, value in evidence_by_id[evidence_id].items() if key not in {"source_path", "record_key", "preview"}}
         for evidence_id in referenced_ids
         if evidence_id in evidence_by_id
     ]
@@ -92,6 +92,15 @@ def create_server(analysis: ProjectAnalysis):
     def get_project_statistics(project_ids: list[str], start: str | None = None, end: str | None = None) -> dict:
         """Project or cross-project statistics. ISO times require offsets; end is exclusive. Null means unknown."""
         return analysis.statistics(project_ids, start, end)
+
+    @server.tool(annotations=read)
+    def analyze_project_work_logs(project_id: str, start: str | None = None, end: str | None = None) -> dict:
+        """Read-only local Codex work-log analysis for ONE project.
+
+        Returns priorities, evidence, coverage and limitations; not a causal diagnosis.
+        No external model calls or writes. ISO times need offsets; end is exclusive.
+        """
+        return analysis.analyze_logs(project_id, start, end)
 
     @server.tool(annotations=read)
     def get_project_instructions(project_ids: list[str]) -> list[dict]:
