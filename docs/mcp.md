@@ -86,11 +86,20 @@ UI와 MCP가 같은 분석 저장소를 사용해야 요청·결과를 서로 �
 세션이 수행하며 해당 에이전트의 데이터 전송·과금 설정이 적용된다. 앱은 모델 API를
 직접 호출하거나 별도 CLI 프로세스를 자동 실행하지 않는다.
 
+## 로컬 프로젝트 작업 로그 분석
+
+전체 범위의 `analyze_project_work_logs(project_id, start?, end?)`는 단일 프로젝트의 Codex 작업 로그를 읽기 전용으로 분석한다. 결과는 `rule_version`, `project_id`, `period`, `status`, `coverage`, `report`, `evidence_catalog`, `limitations`를 포함한다. DB 저장·외부 모델 호출·코드 수정은 없으며 시작 포함·종료 제외, 시간대 검증·프로젝트 범위 검증을 적용한다.
+
+UI의 실행·저장 버튼은 같은 엔진의 보고서를 완료 상태로 저장하고 같은 내용의 재분석과 채택을 중복 저장하지 않는다. 단일 프로젝트 심층 요청에는 `context.log_analysis`와 근거가 추가된다. 기존 보고서·SQLite 계약은 유지한다.
+
+`--scope results`는 계속 두 개의 보고서 조회 도구만 제공한다. 새 분석 도구나 근거의 `source_path`, `record_key`, `preview`는 노출하지 않는다. 사용자 작성 보고서 본문은 그대로 포함하므로 별도의 비밀정보 제거 기능으로 간주하지 않는다.
+
 ## 제공 도구
 
 | 도구 | 기능 |
 | --- | --- |
 | `list_projects` | 프로젝트와 연결 세션, 미연결 세션 확인 |
+| `analyze_project_work_logs` | 단일 프로젝트의 Codex 로그 개선 후보·우선순위·근거·검증 방법; 로컬 읽기 전용 |
 | `get_project_statistics` | 프로젝트별 사용량·관측 시간·적용 범위·문제 신호; 여러 ID로 프로젝트 간 비교 |
 | `get_project_instructions` | 프로젝트 지침의 원문·상대 경로·적용 폴더·SHA256·수집 진단 |
 | `compare_project_instructions` | 첫 프로젝트를 기준으로 같은 상대 경로의 지침 차이와 동일 파일 확인 |

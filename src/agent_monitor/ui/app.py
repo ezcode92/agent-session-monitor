@@ -139,14 +139,18 @@ def _filters(snapshot, page="개요"):
     timezone_name = snapshot.get("timezone") or snapshot.get("config", {}).get("timezone") or "Asia/Seoul"
     with st.sidebar:
         st.markdown("**Agent Session Monitor**")
-        st.caption("로컬 세션 기록 · 작업 회고")
-        choice=remember(st.selectbox,"기간",options=["최근 7일","오늘","최근 30일","직접 선택"],key="filter-period")
-        dates=remember(st.date_input,"분석 기간",value=(datetime.now().date()-timedelta(days=6),datetime.now().date()),key="filter-dates") if choice=="직접 선택" else None
+        st.caption("Codex 전용 · 로컬 세션 기록 · 작업 회고")
+        period_disabled = page in {"회고·개선", "설정"}
+        scope_disabled = period_disabled or page == "에이전트 분석"
+        choice=remember(st.selectbox,"기간",options=["최근 7일","오늘","최근 30일","직접 선택"],key="filter-period", disabled=period_disabled)
+        dates=remember(st.date_input,"분석 기간",value=(datetime.now().date()-timedelta(days=6),datetime.now().date()),key="filter-dates", disabled=period_disabled) if choice=="직접 선택" else None
         start,end=period_bounds(choice,*(dates if isinstance(dates,tuple) and len(dates)==2 else (None,None)),tz_name=timezone_name)
         configured=set(snapshot.get("paths",{})) | set(snapshot.get("config",{}).get("paths",{})); discovered=set(sessions.get("agent",pd.Series(dtype=str)).dropna().astype(str)); agent_options=sorted(configured|discovered)
-        agents=remember(st.multiselect,"에이전트",options=agent_options,key="filter-agents",format_func=lambda value: "agy (Antigravity)" if value in {"antigravity","agy"} else value)
-        projects=remember(st.multiselect,"프로젝트",options=sorted(sessions.get("project",pd.Series(dtype=str)).dropna().astype(str).unique()),key="filter-projects")
-        models=remember(st.multiselect,"모델",options=sorted(frame(snapshot["usage"]).get("model",pd.Series(dtype=str)).dropna().astype(str).unique()),key="filter-models")
+        agents=remember(st.multiselect,"에이전트",options=agent_options,key="filter-agents",format_func=lambda value: "agy (Antigravity)" if value in {"antigravity","agy"} else value, disabled=scope_disabled)
+        projects=remember(st.multiselect,"프로젝트",options=sorted(sessions.get("project",pd.Series(dtype=str)).dropna().astype(str).unique()),key="filter-projects", disabled=scope_disabled)
+        models=remember(st.multiselect,"모델",options=sorted(frame(snapshot["usage"]).get("model",pd.Series(dtype=str)).dropna().astype(str).unique()),key="filter-models", disabled=scope_disabled)
+        if scope_disabled:
+            st.caption("이 화면은 저장한 전체 기록·설정을 표시합니다." if period_disabled else "기간만 적용합니다. 분석할 프로젝트는 본문에서 선택하세요.")
         refresh = st.toggle("고급: 전체 화면 5초 자동 새로고침", value=False)
         if st.button("지금 새로고침", width="stretch"):
             from agent_monitor.service import refresh_sources
@@ -170,6 +174,7 @@ def _filters(snapshot, page="개요"):
         diagnostics=list(snapshot.get("diagnostics", []))+list(snapshot.get("config_diagnostics", []))
         if diagnostics:
             st.warning(f"진단 {len(diagnostics)}건: 설정에서 수집 상태와 형식 안내를 확인하세요.")
+            st.page_link(str(Path(__file__).with_name("pages") / "settings.py"), label="수집 진단 확인")
     if refresh: _dashboard_refresh()
     selected=filtered_sessions(sessions,start,end,agents,projects)
     return selected,{"page":page,"start":start,"end":end,"agents":agents,"projects":projects,"models":models,"timezone":timezone_name}
@@ -472,14 +477,14 @@ def settings(snapshot, sessions, state):
         paths = pd.DataFrame([{"agent": agent, "path": path} for agent, roots in config["paths"].items() for path in roots], columns=["agent", "path"])
         with st.container(key="asm-settings-fields"):
             st.header("수집 설정")
-            st.caption("변경한 경로와 시간대는 설정 저장을 눌렀을 때 적용됩니다.")
+            st.caption("Codex만 수집합니다. Claude·AGY 수집은 지원 종료되었으며 기존 원본 로그와 저장된 회고는 삭제하지 않습니다.")
             timezone_name = st.text_input("IANA timezone", value=snapshot.get("timezone") or config.get("timezone") or "UTC", key="settings-timezone")
             normalized_tz, timezone_error = normalized_timezone({"timezone": timezone_name})
             if timezone_error:
                 st.error(timezone_error["message"])
             editor_paths = st.session_state.get("settings-paths-draft", paths)
             edited = st.data_editor(editor_paths, width="stretch", hide_index=True, num_rows="dynamic", key="paths-editor",
-                                    column_config={name: {"help": COLUMN_HELP[name]} for name in ("agent", "path")})
+                                    column_config={"agent": st.column_config.SelectboxColumn("에이전트", options=["codex"], required=True, default="codex"), "path": {"help": COLUMN_HELP["path"]}})
             left, middle, right = st.columns(3)
             if left.button("설정 저장", type="primary", width="stretch"):
                 if timezone_error:
@@ -488,7 +493,9 @@ def settings(snapshot, sessions, state):
                     new_paths = {agent: [] for agent in config.get("paths", {})}
                     for row in edited.to_dict("records"):
                         if row.get("agent") and row.get("path"):
-                            new_paths.setdefault(str(row["agent"]), []).append(str(row["path"]))
+                            if row["agent"] != "codex":
+                                raise ValueError("Codex 수집 경로만 설정할 수 있습니다.")
+                            new_paths["codex"].append(str(row["path"]))
                     updated = {**config, "timezone": normalized_tz, "paths": new_paths}
                     with st.spinner("설정을 저장하고 수집 상태를 확인하는 중…"):
                         save_config(updated)
@@ -529,7 +536,7 @@ def settings(snapshot, sessions, state):
                         st.session_state.pop("settings-restore-pending", None)
                         st.rerun()
         with st.expander("현재 수집 경로"):
-            st.caption("AGY는 brain/<세션 ID>/.system_generated/logs/transcript.jsonl을 읽습니다. 설치 폴더와 brain 폴더를 모두 지정할 수 있습니다.")
+            st.caption("Codex의 sessions·archived_sessions 아래 JSONL을 읽습니다. 비활성화된 수집기의 경로는 검사하지 않습니다.")
             _table(paths, width="stretch", hide_index=True)
     except (OSError, ValueError, CoreContractError) as error:
         if "edited" in locals():
@@ -540,7 +547,14 @@ def settings(snapshot, sessions, state):
     for label, items in (("로그 읽기·해석", snapshot.get("diagnostics", [])), ("설정·경로", snapshot.get("config_diagnostics", []))):
         st.subheader(label)
         if items:
-            _table(frame(items), width="stretch", hide_index=True, column_config={"message": {"help": "진단 원인과 수집에 미치는 영향입니다."}})
+            data = frame(items)
+            if "kind" in data:
+                counts = data.groupby("kind", dropna=False).size().reset_index(name="건수")
+                _table(counts, width="stretch", hide_index=True)
+                kinds = st.multiselect("진단 유형", sorted(data["kind"].dropna().unique()), key=f"diagnostic-kinds:{label}")
+                if kinds:
+                    data = data[data["kind"].isin(kinds)]
+            _table(data, width="stretch", hide_index=True, column_config={"message": {"help": "진단 원인과 수집에 미치는 영향입니다."}})
         else:
             st.info(f"{label} 진단이 없습니다.")
 

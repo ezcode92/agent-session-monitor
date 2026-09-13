@@ -61,8 +61,27 @@ def project_improvements(store=None):
 
 def _report(store, job):
     report = job["report"]
-    st.header("에이전트 분석 결과")
+    local = job["context"].get("analysis_kind") == "project_logs"
+    st.header("프로젝트 작업 로그 개선 분석 결과" if local else "에이전트 분석 결과")
     st.write(report["summary"])
+    if local:
+        period = job["context"]["statistics"]["period"]
+        st.caption(f"저장 당시 분석 범위: {period['start'] or '전체'} ~ {period['end_exclusive'] or '전체'} (종료 미포함) · 규칙 기반 · 추가 AI 호출 없음")
+        coverage = job["context"]["coverage"]
+        st.caption(f"분석한 이벤트 {coverage['events_analyzed']:,}/{coverage['events_available']:,}건 · 도구 호출 {coverage['tool_calls']:,}건 · 결과 연결 {coverage['paired_results']:,}건")
+        if coverage["truncated"]:
+            st.warning("분석 상한으로 최근 로그 일부만 분석했습니다. 기간을 좁혀 다시 확인하세요.")
+        if job["context"]["analysis_status"] == "insufficient_evidence":
+            st.info("분석 근거가 부족합니다. 프로젝트 연결·Codex 수집 경로·선택 기간을 확인하세요.")
+        st.json(coverage, expanded=False)
+        with st.expander("분석 한계와 판정 기준"):
+            for limitation in job["context"]["limitations"]:
+                st.write(limitation)
+        if report["recommendations"]:
+            st.dataframe([{"우선순위": item.get("priority", "P2"), "개선 제안": item["title"],
+                           "근거 건수": item.get("observed_count", len(item["evidence_ids"])),
+                           "검증 방법": item.get("validation", "")}
+                          for item in report["recommendations"]], hide_index=True, width="stretch")
     refs = {item["id"]: item for item in job["context"]["evidence_catalog"]}
     for finding in report["findings"]:
         with st.expander(finding["title"]):
@@ -72,6 +91,8 @@ def _report(store, job):
     for index, recommendation in enumerate(report["recommendations"]):
         with st.expander("개선 제안: " + recommendation["title"]):
             st.write(recommendation["rationale"])
+            if recommendation.get("validation"):
+                st.caption("개선 후 확인: " + recommendation["validation"])
             st.json([refs[key] for key in recommendation["evidence_ids"]])
             if st.button("실천할 개선 항목으로 채택", key=f"accept:{job['job_id']}:{index}", disabled=(job["job_id"], index) in accepted):
                 store.accept(job["job_id"], index)
@@ -81,7 +102,7 @@ def _report(store, job):
 
 
 def agent_analysis_page(snapshot, state):
-    page_header("프로젝트·에이전트 분석", "프로젝트 통계와 지침을 비교하고 연결한 에이전트의 분석을 검토합니다. 공통 필터 중 기간만 적용하며 분석할 프로젝트는 아래에서 선택합니다.")
+    page_header("프로젝트·에이전트 분석", "Codex 작업 로그에서 프로젝트별 개선안을 분석하고, 필요하면 연결한 Codex의 심층 분석을 요청합니다. 공통 필터 중 기간만 적용하며 분석할 프로젝트는 아래에서 선택합니다.")
     service = ProjectAnalysis(lambda: snapshot)
     try:
         catalog = service.catalog()
@@ -114,7 +135,17 @@ def agent_analysis_page(snapshot, state):
             st.download_button("프로젝트 통계 JSON", json.dumps(statistics, ensure_ascii=False, indent=2, default=str), "project-statistics.json", "application/json")
             if st.button("프로젝트 지침 비교" if len(selected) > 1 else "프로젝트 지침 보기"):
                 st.json(service.compare_instructions(selected) if len(selected) > 1 else service.instructions(selected))
-            st.header("에이전트에게 분석 요청")
+            if len(selected) == 1:
+                st.header("프로젝트 작업 로그 개선 분석")
+                st.caption("선택한 프로젝트·기간의 Codex 로그만 로컬 규칙으로 분석합니다. 반복 실패·테스트 실패·반복 조회·입력 토큰 급증과 근거를 검토할 수 있습니다. 원본 로그와 프로젝트 코드는 변경하지 않습니다.")
+                if st.button("작업 로그 분석 실행·저장", type="primary"):
+                    with st.spinner("프로젝트 로그의 근거를 분석하는 중…"):
+                        job = service.save_log_analysis(selected[0], state.get("start"), state.get("end"), session_keys)
+                    st.session_state["selected-analysis-job"] = job["job_id"]
+                    st.session_state.pop("_ui:selected-analysis-job", None)
+                    saved_notice("작업 로그 분석을 저장했습니다. 같은 범위·근거의 재분석은 기존 보고서를 사용합니다.")
+                    st.rerun()
+            st.header("Codex에게 심층 분석 요청")
             st.caption("요청을 저장한 뒤 MCP로 연결한 에이전트에게 전달하세요. 요청 생성만으로 분석이 시작되지는 않습니다.")
             with st.form("request-agent-analysis"):
                 objective = st.text_area("에이전트에게 요청할 분석", value="작업 이력과 통계에서 반복되는 문제를 찾고, 프로젝트 지침을 비교해 근거가 있는 작업 방식·지침 개선안을 제안해 주세요.", max_chars=4000)
@@ -148,8 +179,9 @@ def agent_analysis_page(snapshot, state):
             job = jobs[identity]
             st.write(f"**{STATES[job['status']]}**")
             st.caption(f"담당: {job['agent_name'] or '미지정'} · 요청: {job['created_at']}")
-            with st.expander("에이전트에 전달할 요청"):
-                st.code(service.agent_prompt(identity), language=None, wrap_lines=True)
+            if job["context"].get("analysis_kind") != "project_logs":
+                with st.expander("에이전트에 전달할 요청"):
+                    st.code(service.agent_prompt(identity), language=None, wrap_lines=True)
             if job["status"] in {"running", "failed"}:
                 if job["error"]:
                     st.error(job["error"])

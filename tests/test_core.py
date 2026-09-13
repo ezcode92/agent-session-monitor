@@ -193,10 +193,10 @@ def test_selected_poll_replaces_only_the_matching_agent_without_snapshot_recombi
     totals = {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in updated['requests']}
     assert totals == {('codex', 'same'): 30}
     assert {(event.agent, event.session_id) for event in updated['events']} == {('codex', 'same')}
-    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in initial['requests']} == {('codex', 'same'): 1, ('claude', 'same'): 1}
+    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in initial['requests']} == {('codex', 'same'): 1}
     assert updated['generation'] == initial['generation'] + 1
     legacy = monitor.poll_session('same')
-    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in legacy['requests']} == {('codex', 'same'): 30, ('claude', 'same'): 1}
+    assert {(turn.agent, turn.session_id): turn.usage[0].total_tokens for turn in legacy['requests']} == {('codex', 'same'): 30}
     assert legacy['generation'] > updated['generation']
 
 
@@ -317,9 +317,9 @@ def test_monitor_logs_merge_mirrored_sources_and_filter_to_selected_session(tmp_
         (folder / 'transcript.jsonl').write_text('{"id":"e","timestamp":"2026-01-01T00:00:00Z","role":"user","content":"live"}\n', encoding='utf-8')
     monitor = AgentMonitor({'paths': {'codex': [], 'claude': [], 'antigravity': [str(root) for root in roots]}})
     events = monitor.recent_events('same', limit=200, include_raw=True)
-    assert len(events) == 1
-    assert len(events[0].sources) == 3 and events[0].source_kind == 'antigravity'
-    assert events[0].raw_record['content'] == 'live'
+    assert events == []  # Deprecated collectors never read historical sources.
+    assert monitor.get_snapshot()['diagnostics'] == []
+    assert monitor.get_snapshot()['paths'] == {'codex': []}
 
 
 def test_antigravity_brain_path_uses_conversation_component(tmp_path):

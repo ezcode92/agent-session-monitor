@@ -68,7 +68,7 @@ def fixture():
                                        "event_id": f"browser-tool-{index}", "occurred_at": snapshot["scanned_at"] + timedelta(seconds=index),
                                        "source_path": "synthetic.jsonl", "record_key": str(index+100),
                                        "display": raw["type"], "tool_observations": tool_observations(raw)})
-    snapshot["config"]["paths"] = {"codex": [str(project / "synthetic-logs")], "claude": [], "antigravity": []}
+    snapshot["config"]["paths"] = {"codex": [str(project / "synthetic-logs")]}
     snapshot["paths"] = snapshot["config"]["paths"]
     reviews = ReviewStore()
     task = reviews.save_task(title="대시보드 사용성 개선", sessions=[snapshot["sessions"][0]], task_type="feature", outcome="partial",
@@ -101,7 +101,7 @@ def save_config(value, *args, **kwargs):
 
 config.load_config = lambda *args, **kwargs: deepcopy(snapshot["config"])
 config.save_config = save_config
-config.default_config = lambda: {"timezone": "Asia/Seoul", "paths": {"codex": [], "claude": [], "antigravity": []}}
+config.default_config = lambda: {"timezone": "Asia/Seoul", "paths": {"codex": []}}
 service.update_config = lambda *args, **kwargs: None
 service.reload_config = lambda *args, **kwargs: None
 service.refresh_sources = lambda: snapshot

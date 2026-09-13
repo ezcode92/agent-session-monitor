@@ -84,12 +84,9 @@ def test_unrecognized_brain_schema_keeps_diagnostic(tmp_path):
     assert not result.sessions and result.diagnostics[0].kind == 'unsupported_format'
 
 
-def test_default_roots_target_brain_directories(tmp_path, monkeypatch):
+def test_default_roots_only_enable_codex(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, 'home', classmethod(lambda cls: tmp_path))
-    assert default_config()['paths']['antigravity'] == [
-        str(tmp_path / '.gemini' / name / 'brain')
-        for name in ('antigravity', 'antigravity-cli', 'antigravity-ide')
-    ]
+    assert set(default_config()['paths']) == {'codex'}
 
 
 def test_saved_installation_roots_remain_unchanged_and_scan_same_logs(tmp_path):
@@ -99,7 +96,8 @@ def test_saved_installation_roots_remain_unchanged_and_scan_same_logs(tmp_path):
     content = json.dumps({'paths': {'antigravity': [str(root)]}})
     config_path.write_text(content, encoding='utf-8')
     loaded = load_config(config_path)
-    assert loaded['paths']['antigravity'] == [str(root)]
+    assert 'antigravity' not in loaded['paths']
+    assert loaded['deprecated_paths']['antigravity'] == [str(root)]
     assert config_path.read_text(encoding='utf-8') == content
     installation_sources = scan_sources({'antigravity': [str(root)]})
     brain_sources = scan_sources({'antigravity': [str(root / 'brain')]})

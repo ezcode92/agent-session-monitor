@@ -217,6 +217,32 @@ class ProjectAnalysis:
                 "Counts and token totals across projects do not establish productivity or causal improvement.",
                 "Timed queries exclude records without the required timestamps."]}
 
+    def analyze_logs(self, pid, start=None, end=None, session_keys=None):
+        """Analyze one project's Codex logs locally without writes or model calls."""
+        from .project_logs import analyze_project_logs
+        snapshot, projects, keys, left, right = self._selection([pid], start, end, session_keys)
+        keys = {key for key in keys if key[0] == "codex"}
+        subset = self._subset(snapshot, keys, left, right)
+        period = {"start": left.isoformat() if left else None,
+                  "end_exclusive": right.isoformat() if right else None}
+        result = analyze_project_logs(subset, pid, projects[0]["name"], period)
+        result["coverage"]["events_excluded_missing_time"] = sum(
+            (row(event).get("agent"), row(event).get("session_id")) in keys
+            and row(event).get("occurred_at") is None
+            for event in snapshot.get("events", [])
+        ) if left or right else 0
+        return result
+
+    def save_log_analysis(self, pid, start=None, end=None, session_keys=None):
+        result = self.analyze_logs(pid, start, end, session_keys)
+        context = {"objective": f"프로젝트 작업 로그 개선 분석: {result['project_name']}",
+                   "analysis_kind": "project_logs", "rule_version": result["rule_version"],
+                   "project_ids": [pid], "session_keys": sorted(map(list, session_keys)) if session_keys is not None else None,
+                   "statistics": {"period": result["period"]}, "coverage": result["coverage"],
+                   "limitations": result["limitations"], "evidence_catalog": result["evidence_catalog"],
+                   "analysis_status": result["status"]}
+        return self.store.save_log_report(context, result["report"])
+
     def instructions(self, project_ids):
         _, projects, _, _, _ = self._selection(project_ids)
         return [read_instructions(project) for project in projects]
@@ -283,6 +309,10 @@ class ProjectAnalysis:
             instruction_metadata.append({**document, "files": files})
         context = {"objective": objective, "project_ids": list(dict.fromkeys(project_ids)), "session_keys": session_keys,
                    "statistics": statistics, "instructions": instruction_metadata, "evidence_catalog": evidence}
+        if len(context["project_ids"]) == 1:
+            logs = self.analyze_logs(context["project_ids"][0], start, end, session_keys)
+            context["log_analysis"] = {key: logs[key] for key in ("report", "coverage", "limitations", "rule_version")}
+            context["evidence_catalog"].extend(logs["evidence_catalog"])
         identity = self.store.create_job(context)
         return {"job_id": identity, "status": "pending", "agent_prompt": self.agent_prompt(identity)}
 
