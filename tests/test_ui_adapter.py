@@ -32,6 +32,7 @@ s={"timezone":"UTC","config":{"timezone":"UTC","paths":{"antigravity":["C:/a/.ge
 ui._snapshot=lambda force=False:s
 ui.run()'''
     app=AppTest.from_string(source).run()
+    assert not app.exception
     assert "agy (Antigravity)" in app.multiselect[0].options
     assert any("진단 1건" in item.value for item in app.warning)
 

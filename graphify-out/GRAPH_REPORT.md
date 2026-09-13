@@ -1,21 +1,21 @@
-# Graph Report - agent-session-monitor  (2026-09-12)
+# Graph Report - agent-session-monitor  (2026-09-13)
 
 ## Corpus Check
-- 82 files · ~76,871 words
+- 85 files · ~77,407 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 817 nodes · 1828 edges · 50 communities (42 shown, 7 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 149 edges (avg confidence: 0.92)
+- 778 nodes · 1741 edges · 46 communities (42 shown, 4 thin omitted)
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 32 edges (avg confidence: 0.68)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d4799ce7`
+- Built from commit: `8015c6a9`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- test_core.py
+- AgentMonitor
 - build_view_data
 - frame
 - verify_ui.mjs
@@ -23,18 +23,18 @@
 - test_ui_adapter.py
 - test_live_completion.py
 - test_history_navigation.py
-- ProjectAnalysis
-- AgentMonitor
+- ProjectStore
+- load_config
 - adapter.py
 - request_timeline
 - ui/app.py
-- test_request_tools.py
-- browser_app.py
+- insights.py
+- load_snapshot
 - design/README.md
-- create_server
+- _filters
 - Validation
 - What You Must Do When Invoked
-- test_design_ui.py
+- Q: 이 프로젝트 chatgpt 앱이 tinyfish로 접속해서 점검할 수 있게 하려면 어떻게 해야해? 그리고 분석 결과를 chatgpt web이 확인할 수 있는 방법도 제공했으면 해. 현재 iptime ddns로 ezcode92.iptime.org 도메인을 지정했고, http로만 제공 가능해
 - agent-session-monitor
 - graphify reference: extra exports and benchmark
 - graphify reference: query, path, explain
@@ -49,126 +49,127 @@
 - 개인용 작업 회고·개선 계획
 - 에이전트 분석과 MCP 연결
 - Agent Session Monitor
-- test_project_logs.py
+- Q: 예정된 남은 작업 있나
 - 디자인 지침 이식 기록
 - 브랜드·색상·문구
 - 공통 컴포넌트·상태
 - 로컬 에이전트 모니터 UI 벤치마크
 - 레이아웃·정보 밀도
 - test_app_integration.py
+- Q: 왜 로컬호스트로도 접속이 안되지
 - clipped_duration_seconds
-- benchmark_monitor.py
-- go_page
-- request_detail.py
-- test_project_logs_ui.py
-- Codex 전용 전환과 프로젝트 작업 로그 개선 분석
-- test_actual_pause_raw_and_generation_refresh_actions
-- test_analysis_groups_categories_by_local_day_week_month
+- test_request_tools.py
+- _history_events
+- README.md
 
 ## God Nodes (most connected - your core abstractions)
 1. `AgentMonitor` - 38 edges
-2. `ProjectAnalysis` - 30 edges
-3. `ProjectStore` - 30 edges
+2. `ProjectStore` - 30 edges
+3. `ProjectAnalysis` - 29 edges
 4. `frame()` - 29 edges
-5. `ParseResult` - 26 edges
-6. `parse_codex()` - 24 edges
-7. `build_view_data()` - 24 edges
-8. `ReviewStore` - 22 edges
-9. `SourceFile` - 21 edges
-10. `Session` - 20 edges
+5. `parse_codex()` - 24 edges
+6. `ParseResult` - 22 edges
+7. `ReviewStore` - 22 edges
+8. `build_view_data()` - 22 edges
+9. `go_page()` - 20 edges
+10. `SourceFile` - 19 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `test_monitor_logs_merge_mirrored_sources_and_filter_to_selected_session()` --uses--> `AgentMonitor`  [INFERRED]
-  tests/test_core.py → src/agent_monitor/service.py
-- `test_monitor_reparses_replaced_or_growing_jsonl_and_exposes_recent_events()` --uses--> `AgentMonitor`  [INFERRED]
-  tests/test_core.py → src/agent_monitor/service.py
-- `test_poll_session_generation_changes_only_when_selected_file_changes()` --uses--> `AgentMonitor`  [INFERRED]
-  tests/test_core.py → src/agent_monitor/service.py
-- `test_snapshot_timezone_is_normalized_and_invalid_value_is_diagnostic()` --uses--> `AgentMonitor`  [INFERRED]
-  tests/test_core.py → src/agent_monitor/service.py
-- `main()` --uses--> `AgentMonitor`  [INFERRED]
-  benchmark_monitor.py → src/agent_monitor/service.py
+- `main()` --calls--> `load_config()`  [INFERRED]
+  mcp_server.py → src/agent_monitor/config.py
+- `main()` --calls--> `AgentMonitor`  [INFERRED]
+  mcp_server.py → src/agent_monitor/service.py
+- `test_load_config_valid_json_wrong_shape_falls_back()` --calls--> `load_config()`  [EXTRACTED]
+  tests/test_core.py → src/agent_monitor/config.py
+- `test_codex_task_start_before_context_preserves_tool_only_request()` --calls--> `AgentMonitor`  [INFERRED]
+  tests/test_request_tools.py → src/agent_monitor/service.py
+- `test_analysis_groups_categories_by_local_day_week_month()` --calls--> `frame()`  [INFERRED]
+  tests/test_app_integration.py → src/agent_monitor/ui/adapter.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (50 total, 7 thin omitted)
+## Communities (46 total, 4 thin omitted)
 
-### Community 0 - "test_core.py"
-Cohesion: 0.08
-Nodes (77): analyze(), download_data(), filter_data(), interval_for_dates(), orchestration_graph(), depth(), subtree(), datetime (+69 more)
+### Community 0 - "AgentMonitor"
+Cohesion: 0.05
+Nodes (90): analyze(), download_data(), filter_data(), interval_for_dates(), orchestration_graph(), datetime, Canonical session graph based only on parser-provided explicit parents., report() (+82 more)
 
 ### Community 1 - "build_view_data"
-Cohesion: 0.10
-Nodes (30): DataFrame, split_duration_by_day(), filtered_requests(), filtered_sessions(), filtered_usage(), Apply every dashboard filter at the normalized usage-event level., Filter session metadata only. Model and period are usage-event filters in the…, Match canonical agent/session pairs without row-wise Python calls. Older… (+22 more)
+Cohesion: 0.15
+Nodes (21): filtered_requests(), filtered_sessions(), filtered_usage(), Apply every dashboard filter at the normalized usage-event level., Filter session metadata only. Model and period are usage-event filters in the…, build_view_data(), _event_timestamp(), Pure, deterministic view-model construction shared by dashboard pages. (+13 more)
 
 ### Community 2 - "frame"
-Cohesion: 0.20
-Nodes (21): poll_session(), duration_label(), export_csv(), frame(), Display elapsed seconds as hours:minutes:seconds, without a 24-hour wrap., weighted_cache_ratio(), analysis(), _chart() (+13 more)
+Cohesion: 0.15
+Nodes (28): raw_event(), duration_label(), export_csv(), frame(), Display elapsed seconds as hours:minutes:seconds, without a 24-hour wrap., usage_label(), weighted_cache_ratio(), analysis() (+20 more)
 
 ### Community 3 - "verify_ui.mjs"
 Cohesion: 0.25
 Nodes (17): browser, call(), evaluate(), exceptions, interactions(), layout(), navigate(), pause() (+9 more)
 
 ### Community 4 - "ReviewStore"
-Cohesion: 0.13
-Nodes (21): Local, user-authored retrospectives. Source transcripts are never stored here., ReviewStore, _text(), agent_analysis_page(), project_improvements(), _project_settings(), Project comparison and analysis delegated to a connected MCP agent., _report() (+13 more)
+Cohesion: 0.14
+Nodes (19): Local, user-authored retrospectives. Source transcripts are never stored here., ReviewStore, _text(), agent_analysis_page(), project_improvements(), _project_settings(), Project comparison and analysis delegated to a connected MCP agent., _report() (+11 more)
 
 ### Community 5 - "test_ui_adapter.py"
-Cohesion: 0.10
-Nodes (14): period_bounds(), datetime, usage_total(), _usage(), test_duration_labels_preserve_unknown_and_do_not_wrap_at_one_day(), test_event_noise_filter_is_ui_only_and_follow_can_use_all_events(), test_event_source_and_csv_provenance(), test_event_type_noise_hides_metadata_but_keeps_tool() (+6 more)
+Cohesion: 0.09
+Nodes (17): filter_events(), Apply UI filters without treating an empty selected-session set as all., usage_total(), _scalar_table(), _usage(), test_actual_entrypoint_populated_snapshot_pages_and_scalar_history(), test_event_filter_and_cursor_respect_time_agent_model_and_generation(), test_event_noise_filter_is_ui_only_and_follow_can_use_all_events() (+9 more)
 
 ### Community 6 - "test_live_completion.py"
-Cohesion: 0.30
-Nodes (11): codex_rows(), make_monitor(), parametrize, test_cancelled_and_failed_codex_continue_tracking(), test_deprecated_agy_is_not_read_by_dashboard_or_live_poll(), test_initial_complete_codex_does_not_stat(), test_legacy_poll_keeps_other_agent_with_same_id_running(), test_live_completion_stops_stat_after_returning_final_event() (+3 more)
+Cohesion: 0.40
+Nodes (10): codex_rows(), make_monitor(), parametrize, test_cancelled_and_failed_codex_continue_tracking(), test_deprecated_agy_is_not_read_by_dashboard_or_live_poll(), test_initial_complete_codex_does_not_stat(), test_legacy_poll_keeps_other_agent_with_same_id_running(), test_live_completion_stops_stat_after_returning_final_event() (+2 more)
 
 ### Community 7 - "test_history_navigation.py"
-Cohesion: 0.30
+Cohesion: 0.34
 Nodes (13): history_app(), parametrize, select_cell(), snapshot_fixture(), test_changed_visible_rows_clear_old_cell_selection(), test_completed_codex_graph_disables_live_control(), test_completed_codex_history_never_calls_live_service(), test_live_completion_keeps_final_events_and_stops_next_service_call() (+5 more)
 
-### Community 8 - "ProjectAnalysis"
-Cohesion: 0.05
-Nodes (40): cache_resource, main(), Standalone stdio MCP entrypoint; does not start or import Streamlit., create_results_server(), get_analysis_report(), MCP tools backed by exactly the same project analysis service as the UI., Return a completed report without local filesystem evidence locations., Create a read-only MCP surface for reviewing completed analysis reports. (+32 more)
+### Community 8 - "ProjectStore"
+Cohesion: 0.07
+Nodes (32): main(), Standalone stdio MCP entrypoint; does not start or import Streamlit., create_results_server(), create_server(), MCP tools backed by exactly the same project analysis service as the UI., Return a completed report without local filesystem evidence locations., Create a read-only MCP surface for reviewing completed analysis reports., _result_view() (+24 more)
 
-### Community 9 - "AgentMonitor"
-Cohesion: 0.09
-Nodes (37): codex_only_config(), default_config(), load_config(), normalized_timezone(), path_diagnostics(), Any, Path, Keep legacy paths inactive without deleting settings or source files. (+29 more)
+### Community 9 - "load_config"
+Cohesion: 0.18
+Nodes (23): codex_only_config(), default_config(), load_config(), normalized_timezone(), path_diagnostics(), Any, Path, Keep legacy paths inactive without deleting settings or source files. (+15 more)
 
 ### Community 10 - "adapter.py"
-Cohesion: 0.13
-Nodes (29): append_bounded(), append_unique(), event_is_noise(), event_rows(), filter_events(), get(), hierarchy_rows(), lazy_preview() (+21 more)
+Cohesion: 0.18
+Nodes (25): append_bounded(), append_unique(), event_is_noise(), event_rows(), get(), hierarchy_rows(), lazy_preview(), monitor_cursor() (+17 more)
 
 ### Community 11 - "request_timeline"
 Cohesion: 0.47
 Nodes (8): Keep each known request interval separate, clipped to the selected period., request_timeline(), request(), test_composite_session_filter_does_not_include_other_agents(), test_offset_times_are_converted_to_utc_and_missing_columns_are_empty(), test_request_intervals_keep_gaps_and_metadata_without_mutating_source(), test_selected_period_clips_partial_intervals_and_omits_outside_rows(), test_unknown_invalid_zero_and_reversed_intervals_are_omitted()
 
 ### Community 12 - "ui/app.py"
-Cohesion: 0.08
-Nodes (28): main(), Testable Streamlit entrypoint; importing this module has no UI side effects., fragment, RuntimeError, Public manual-refresh path; unlike force=True it keeps parse cache hits., refresh_sources(), _agent_status(), _dashboard_refresh() (+20 more)
+Cohesion: 0.14
+Nodes (12): main(), Testable Streamlit entrypoint; importing this module has no UI side effects., poll_session(), render_page(), run(), _view(), Shared descriptions for dashboard table headers., navigation() (+4 more)
 
-### Community 13 - "test_request_tools.py"
-Cohesion: 0.08
-Nodes (48): analyze_task(), _digest(), _failed(), _get(), _object(), _preview(), Deterministic review signals from explicit tool observations and known usage., Normalize supported content blocks; unknown schemas supply no observations. (+40 more)
+### Community 13 - "insights.py"
+Cohesion: 0.13
+Nodes (30): analyze_task(), _digest(), _failed(), _get(), _object(), _preview(), Deterministic review signals from explicit tool observations and known usage., Normalize supported content blocks; unknown schemas supply no observations. (+22 more)
 
-### Community 14 - "browser_app.py"
-Cohesion: 0.29
-Nodes (3): Read-only local log analysis for coding agents., Streamlit presentation layer for Agent Monitor., Synthetic browser audit fixture. No real collector, config or user databases.…
+### Community 14 - "load_snapshot"
+Cohesion: 0.20
+Nodes (11): fragment, RuntimeError, _dashboard_refresh(), Independent five-second collector refresh; no custom JS is used., _snapshot(), CoreContractError, load_snapshot(), Any (+3 more)
 
 ### Community 15 - "design/README.md"
 Cohesion: 0.18
 Nodes (7): graphify, UI design, 접근성·검증 기준, 화면 계약, Agent Session Monitor 디자인 안내, 우선순위와 가드레일, 읽는 순서
 
+### Community 16 - "_filters"
+Cohesion: 0.20
+Nodes (10): Public manual-refresh path; unlike force=True it keeps parse cache hits., refresh_sources(), period_bounds(), datetime, _agent_status(), _filters(), Small sidebar inventory that also represents configured empty roots., test_agent_status_keeps_configured_empty_antigravity_root() (+2 more)
+
 ### Community 17 - "Validation"
-Cohesion: 0.13
-Nodes (15): 2026-09-12: Codex 전용 수집과 프로젝트 로그 분석, Actual-use browser and MCP integration (2026-09-09), Automated regression checks (2026-09-09), Daily chart date-axis correction (2026-09-09), Historical benchmark evidence, Historical monitor benchmark, Historical same-snapshot view benchmark (before this UI revision), Previous actual-data checks and limits (2026-09-08) (+7 more)
+Cohesion: 0.12
+Nodes (16): 2026-09-12: Codex 전용 수집과 프로젝트 로그 분석, Actual-use browser and MCP integration (2026-09-09), Automated regression checks (2026-09-09), Daily chart date-axis correction (2026-09-09), Diagnostics link runtime correction (2026-09-13), Historical benchmark evidence, Historical monitor benchmark, Historical same-snapshot view benchmark (before this UI revision) (+8 more)
 
 ### Community 18 - "What You Must Do When Invoked"
 Cohesion: 0.08
 Nodes (24): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+16 more)
 
-### Community 19 - "test_design_ui.py"
-Cohesion: 0.16
-Nodes (11): luminance(), parametrize, Behavioral regression checks for navigation, recovery and accessible themes., test_automatic_refresh_failure_leaves_existing_dashboard_usable(), test_failed_analysis_request_keeps_objective_for_retry(), test_page_roundtrip_preserves_filters_search_selected_session_and_pane(), test_refresh_failure_retains_metrics_and_snapshot_then_retry_replaces_them(), unavailable() (+3 more)
+### Community 19 - "Q: 이 프로젝트 chatgpt 앱이 tinyfish로 접속해서 점검할 수 있게 하려면 어떻게 해야해? 그리고 분석 결과를 chatgpt web이 확인할 수 있는 방법도 제공했으면 해. 현재 iptime ddns로 ezcode92.iptime.org 도메인을 지정했고, http로만 제공 가능해"
+Cohesion: 0.40
+Nodes (4): Answer, Outcome, Q: 이 프로젝트 chatgpt 앱이 tinyfish로 접속해서 점검할 수 있게 하려면 어떻게 해야해? 그리고 분석 결과를 chatgpt web이 확인할 수 있는 방법도 제공했으면 해. 현재 iptime ddns로 ezcode92.iptime.org 도메인을 지정했고, http로만 제공 가능해, Source Nodes
 
 ### Community 21 - "graphify reference: extra exports and benchmark"
 Cohesion: 0.22
@@ -210,9 +211,9 @@ Nodes (8): 로컬 프로젝트 작업 로그 분석, 보고서 형식, 시작, �
 Cohesion: 0.25
 Nodes (8): Agent Session Monitor, MCP 서버와 에이전트 분석, 개인 작업 회고, 검증 현황과 제한 (2026-09-09), 실행, 외부 브라우저 점검과 ChatGPT Web, 프로젝트 작업 로그 개선 분석, 화면
 
-### Community 34 - "test_project_logs.py"
-Cohesion: 0.26
-Nodes (12): event(), pair(), parametrize, test_empty_and_bounded_analysis_report_coverage(), test_explicit_test_failure_and_read_repetition(), test_failures_aggregate_across_sessions_but_not_projects_or_agents(), test_free_text_unfinished_and_unknown_results_are_not_failures(), test_mutating_or_truncated_shell_commands_are_not_file_read_signals() (+4 more)
+### Community 34 - "Q: 예정된 남은 작업 있나"
+Cohesion: 0.40
+Nodes (4): Answer, Outcome, Q: 예정된 남은 작업 있나, Source Nodes
 
 ### Community 35 - "디자인 지침 이식 기록"
 Cohesion: 0.40
@@ -235,52 +236,53 @@ Cohesion: 0.50
 Nodes (3): 레이아웃·정보 밀도, 반응형 기준, 순서와 간격
 
 ### Community 40 - "test_app_integration.py"
-Cohesion: 0.15
-Nodes (14): parametrize, End-to-end Streamlit checks with representative, nonempty monitor data., Run the real app.py entrypoint, rather than a hand-written page stub., _snapshot(), test_actual_entrypoint_renders_all_pages_with_scalar_request_values(), test_composition_chart_keeps_missing_cache_components_unknown(), test_date_line_ticks_are_unique_without_compressing_missing_days(), test_duration_labels_and_composition_chart_use_values_and_explanations() (+6 more)
+Cohesion: 0.05
+Nodes (48): cache_resource, Streamlit presentation layer for Agent Monitor., fixture(), Synthetic browser audit fixture. No real collector, config or user databases.…, go_page(), parametrize, End-to-end Streamlit checks with representative, nonempty monitor data., Exercise the real history controls against a changing synthetic collector. (+40 more)
+
+### Community 41 - "Q: 왜 로컬호스트로도 접속이 안되지"
+Cohesion: 0.40
+Nodes (4): Answer, Outcome, Q: 왜 로컬호스트로도 접속이 안되지, Source Nodes
 
 ### Community 42 - "clipped_duration_seconds"
-Cohesion: 0.40
-Nodes (5): Series, clipped_duration_seconds(), Traverse only the service graph, at arbitrary depth and cycle-safe., subtree_keys(), test_clipped_duration_weighted_ratio_and_arbitrary_subtree()
-
-### Community 43 - "benchmark_monitor.py"
-Cohesion: 0.29
-Nodes (8): main(), measure(), Path, Synthetic, local-only monitor benchmark; does not read configured user logs., Measure view construction from one reused synthetic snapshot., view_benchmark(), samples(), write_log()
-
-### Community 44 - "go_page"
 Cohesion: 0.25
-Nodes (6): go_page(), test_failed_improvement_creation_keeps_text_and_success_clears_it(), test_settings_failure_preserves_draft_and_retry_saves_once(), test_irrelevant_global_filters_are_disabled_and_recover_on_navigation(), test_actual_entrypoint_populated_snapshot_pages_and_scalar_history(), test_populated_app_all_pages_render_without_exceptions()
+Nodes (8): DataFrame, Series, clipped_duration_seconds(), Traverse only the service graph, at arbitrary depth and cycle-safe., Match canonical agent/session pairs without row-wise Python calls. Older…, _selected_session_mask(), subtree_keys(), test_clipped_duration_weighted_ratio_and_arbitrary_subtree()
 
-### Community 45 - "request_detail.py"
-Cohesion: 0.39
-Nodes (7): raw_event(), usage_label(), metrics(), Each tuple is (label, value, explanation); CSS wraps by available space., Selected-session token summary and lazy request tool-call inspection., request_tools(), session_tokens()
+### Community 43 - "test_request_tools.py"
+Cohesion: 0.15
+Nodes (24): main(), measure(), Path, Synthetic, local-only monitor benchmark; does not read configured user logs., Measure view construction from one reused synthetic snapshot., view_benchmark(), write_log(), _order() (+16 more)
 
-### Community 46 - "test_project_logs_ui.py"
-Cohesion: 0.36
-Nodes (5): log_app(), Actual Streamlit interaction tests for local project work-log analysis., test_empty_project_logs_report_explicit_insufficient_evidence(), test_log_analysis_failure_is_retryable_and_does_not_create_job(), test_log_analysis_run_save_adopt_apply_and_reload()
+### Community 44 - "_history_events"
+Cohesion: 0.67
+Nodes (3): _history_events(), Narrow transcript materialization to the selected composite session., test_history_log_filter_is_narrow_and_base_view_has_no_events()
 
-### Community 47 - "Codex 전용 전환과 프로젝트 작업 로그 개선 분석"
-Cohesion: 0.40
+### Community 47 - "README.md"
+Cohesion: 0.28
 Nodes (4): Codex 전용 전환과 프로젝트 작업 로그 개선 분석, 구현 순서와 수용 기준, 데이터와 배포, 판정과 적용 범위
 
 ## Knowledge Gaps
-- **142 isolated node(s):** `agent-session-monitor`, `root`, `profile`, `server`, `browser` (+137 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 289 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **152 isolated node(s):** `agent-session-monitor`, `root`, `profile`, `server`, `browser` (+147 more)
+  These have ≤1 connection - possible missing edges or undocumented components.
+- **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+
+## Work-memory lessons
+
+**Preferred sources** — corroborated by past sessions; start here.
+- `README.md` (2× useful, score=1.98804112)
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `AgentMonitor` connect `AgentMonitor` to `test_core.py`, `build_view_data`, `frame`, `test_live_completion.py`, `ProjectAnalysis`, `benchmark_monitor.py`, `ui/app.py`, `request_detail.py`, `browser_app.py`, `test_request_tools.py`?**
-  _High betweenness centrality (0.066) - this node is a cross-community bridge._
-- **Why does `ProjectAnalysis` connect `ProjectAnalysis` to `test_core.py`, `ReviewStore`, `test_project_logs_ui.py`, `create_server`, `test_design_ui.py`?**
-  _High betweenness centrality (0.062) - this node is a cross-community bridge._
-- **Why does `ProjectStore` connect `ProjectAnalysis` to `ReviewStore`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
-- **Are the 16 inferred relationships involving `AgentMonitor` (e.g. with `main()` and `main()`) actually correct?**
-  _`AgentMonitor` has 16 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 10 inferred relationships involving `ProjectAnalysis` (e.g. with `main()` and `create_server()`) actually correct?**
-  _`ProjectAnalysis` has 10 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 9 inferred relationships involving `ProjectStore` (e.g. with `main()` and `create_results_server()`) actually correct?**
-  _`ProjectStore` has 9 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 14 inferred relationships involving `ParseResult` (e.g. with `analyze()` and `download_data()`) actually correct?**
-  _`ParseResult` has 14 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `AgentMonitor` connect `AgentMonitor` to `build_view_data`, `frame`, `test_live_completion.py`, `ProjectStore`, `load_config`, `test_request_tools.py`, `ui/app.py`, `_filters`?**
+  _High betweenness centrality (0.059) - this node is a cross-community bridge._
+- **Why does `ProjectStore` connect `ProjectStore` to `test_app_integration.py`, `ReviewStore`?**
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
+- **Why does `ProjectAnalysis` connect `ProjectStore` to `AgentMonitor`, `test_app_integration.py`, `ReviewStore`?**
+  _High betweenness centrality (0.038) - this node is a cross-community bridge._
+- **Are the 3 inferred relationships involving `AgentMonitor` (e.g. with `main()` and `ParseResult`) actually correct?**
+  _`AgentMonitor` has 3 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 2 inferred relationships involving `ProjectStore` (e.g. with `main()` and `ProjectAnalysis`) actually correct?**
+  _`ProjectStore` has 2 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 3 inferred relationships involving `ProjectAnalysis` (e.g. with `main()` and `SourceFile`) actually correct?**
+  _`ProjectAnalysis` has 3 INFERRED edges - model-reasoned connections that need verification._
+- **What connects `agent-session-monitor`, `root`, `profile` to the rest of the system?**
+  _152 weakly-connected nodes found - possible documentation gaps or missing edges._

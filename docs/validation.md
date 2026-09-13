@@ -1,5 +1,21 @@
 # Validation
 
+## Diagnostics link runtime correction (2026-09-13)
+
+The sidebar diagnostics branch now imports `pathlib.Path` before constructing
+the Settings page link. This removes the `NameError` that occurred only when a
+collector or configuration diagnostic was present; collection, filtering and
+page-routing contracts are unchanged.
+
+- Regression check: `.venv/bin/pytest
+  tests/test_ui_adapter.py::test_sidebar_shows_configured_antigravity_and_diagnostics
+  -q` — **1 passed in 1.10s**. The check now rejects any Streamlit exception.
+- Related UI suites: `.venv/bin/pytest tests/test_ui_adapter.py
+  tests/test_app_integration.py -q` — **49 passed in 8.65s**.
+
+The affected failure state was exercised with Streamlit `AppTest`; a physical
+browser click through the diagnostics link was not repeated.
+
 ## TinyFish audit access and ChatGPT report reader (2026-09-12)
 
 The project now has two deliberately separate remote paths. The synthetic
